@@ -40,9 +40,9 @@ try {
       (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,'demo',$5) ON CONFLICT DO NOTHING`,
       [item.id, item.patientSlug, item.recordedAt, item.value, JSON.stringify(item)]);
     for (const item of demo.food) await db.query(`INSERT INTO meals
-      (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,legacy_payload)
-      VALUES($1,$2,$3,$4,$5,$6,'eaten',$6,$5,'user_chosen',$7) ON CONFLICT DO NOTHING`,
-      [item.id, item.patientSlug, item.meal, item.items, grams(item.carbs), at(item.time), JSON.stringify(item)]);
+      (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,confirmation_provenance,legacy_payload)
+      VALUES($1,$2,$3,$4,$5,$6,'eaten',$6,$5,'user_chosen',$7,$8) ON CONFLICT DO NOTHING`,
+      [item.id, item.patientSlug, item.meal, item.items, grams(item.carbs), at(item.time), JSON.stringify({ source: 'documented_synthetic_fixture' }), JSON.stringify(item)]);
     for (const item of demo.bolus) await db.query(`INSERT INTO insulin_doses
       (id,patient_id,administered_units,administered_at,decision_source,confirmation_provenance,legacy_payload)
       VALUES($1,$2,$3,$4,'user_decided',$5,$6) ON CONFLICT DO NOTHING`,

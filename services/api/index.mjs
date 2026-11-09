@@ -8,7 +8,7 @@ import { ApiError, passwordHash, validPassword } from './lib.mjs';
 import {
   accountByEmail, accountById, addMessage, addPatientRecord, audit, createEmergencyContact,
   deleteEmergencyContact, doctorDirectory, emergencyContacts, publicAccount, rateDoctor,
-  requestDoctor, respondAssignment, snapshot, updateEmergencyContact, updateProfile,
+  requestDoctor, respondAssignment, snapshot, updateEmergencyContact, updateMeal, updateProfile,
 } from './store.mjs';
 
 const serviceDirectory = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +46,7 @@ const reply = (res, status, payload) => {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
   });
   res.end(JSON.stringify(payload));
 };
@@ -134,6 +134,8 @@ const server = createServer(async (req, res) => {
 
     const recordMatch = path.match(/^\/api\/(food|bolus|glucose)$/);
     if (req.method === 'POST' && recordMatch) return reply(res, 200, await addPatientRecord(pool, recordMatch[1], await readBody(req), user));
+    const mealMatch = path.match(/^\/api\/food\/([^/]+)$/);
+    if (req.method === 'PATCH' && mealMatch) return reply(res, 200, await updateMeal(pool, decodeURIComponent(mealMatch[1]), await readBody(req), user));
     if (req.method === 'POST' && path === '/api/messages') return reply(res, 200, await addMessage(pool, await readBody(req), user));
 
     if (path === '/api/emergency-contacts') {

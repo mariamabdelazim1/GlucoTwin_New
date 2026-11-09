@@ -113,6 +113,13 @@ export interface FoodEntry {
   carbs: string;
   impact: string;
   status: string;
+  announcedCarbsG?: number | null;
+  consumedCarbsG?: number | null;
+  plannedEatingAt?: string;
+  actualEatingAt?: string | null;
+  version?: number;
+  updatedAt?: string;
+  confirmAnnouncedAmount?: boolean;
 }
 
 export interface BolusEntry {
@@ -125,6 +132,7 @@ export interface BolusEntry {
   preMeal: string;
   recommended: string;
   recorded: string;
+  administeredAt?: string;
 }
 
 export interface NotificationItem {

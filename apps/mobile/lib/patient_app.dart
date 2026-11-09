@@ -165,7 +165,7 @@ class _PatientSignInState extends State<PatientSignIn> {
         'id': DateTime.now().microsecondsSinceEpoch.toRadixString(36), 'role': 'patient',
         'email': email.text.trim().toLowerCase(), 'password': password.text,
         'patientProfile': {'fullName': name.text.trim(), 'age': age.text, 'weight': weight.text,
-          'height': height.text, 'diabetesType': '', 'insulinPlan': '', 'diagnosisYear': '',
+          'height': height.text, 'diabetesType': '', 'insulinPlan': '',
           'medications': '', 'allergies': '', 'emergencyContact': '', 'selectedDoctorId': doctorId},
       }) : await widget.api.login(email.text.trim(), password.text);
       await widget.onSignedIn(result);
@@ -355,17 +355,19 @@ class _PatientPortalState extends State<PatientPortal> {
 
   Widget _records() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     _panel('Glucose', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [FilledButton.icon(onPressed: () => _entryDialog('glucose'), icon: const Icon(Icons.add), label: const Text('Record reading')), const SizedBox(height: 8), ...list('glucose').take(5).map((raw) { final item = raw as Map<String, dynamic>; return ListTile(contentPadding: EdgeInsets.zero, title: Text('${item['value']} mg/dL'), trailing: Text('${item['time']}')); }), if (list('glucose').isEmpty) _empty('No readings yet.') ])),
-    _panel('Food', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [FilledButton.icon(onPressed: () => _entryDialog('food'), icon: const Icon(Icons.add), label: const Text('Add food')), const SizedBox(height: 8), ...list('food').take(5).map((raw) { final item = raw as Map<String, dynamic>; return ListTile(contentPadding: EdgeInsets.zero, title: Text('${item['meal']}: ${item['items']}'), subtitle: Text('${item['carbs']} carbs'), trailing: Text('${item['time']}')); }), if (list('food').isEmpty) _empty('No food entries yet.') ])),
+    _panel('Food', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [FilledButton.icon(onPressed: () => _entryDialog('food'), icon: const Icon(Icons.add), label: const Text('Add food')), const SizedBox(height: 8), ...list('food').take(5).map((raw) { final item = raw as Map<String, dynamic>; return ListTile(contentPadding: EdgeInsets.zero, title: Text('${item['meal']}: ${item['items']}'), subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${item['carbs']} carbs · ${item['status']}'), if (item['status'] == 'planned' && item['version'] is int) Wrap(spacing: 8, children: [TextButton(onPressed: () => _updateMeal(item, 'eaten'), child: const Text('Mark eaten')), TextButton(onPressed: () => _updateMeal(item, 'cancelled'), child: const Text('Cancel'))])]), trailing: Text('${item['time']}')); }), if (list('food').isEmpty) _empty('No food entries yet.') ])),
     _panel('Manual bolus', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [FilledButton.icon(onPressed: () => _entryDialog('bolus'), icon: const Icon(Icons.add), label: const Text('Log bolus')), const SizedBox(height: 8), ...list('bolus').take(5).map((raw) { final item = raw as Map<String, dynamic>; return ListTile(contentPadding: EdgeInsets.zero, title: Text('${item['recorded']} at ${item['meal']}'), subtitle: Text('${item['carbs']} carbs · ${item['preMeal']} pre-meal'), trailing: Text('${item['time']}')); }), if (list('bolus').isEmpty) _empty('No bolus logs yet.') ])),
   ]);
 
   Future<void> _entryDialog(String kind) async {
     final first = TextEditingController(); final second = TextEditingController(); final third = TextEditingController();
     String meal = 'Lunch';
+    String mealStatus = 'planned';
     final result = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
       title: Text(kind == 'glucose' ? 'Record glucose' : kind == 'food' ? 'Add food' : 'Log bolus'),
       content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (kind != 'glucose') DropdownButtonFormField<String>(initialValue: meal, decoration: const InputDecoration(labelText: 'Meal'), items: ['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) => update(() => meal = v!)),
+        if (kind == 'food') ...[const SizedBox(height: 12), DropdownButtonFormField<String>(initialValue: mealStatus, decoration: const InputDecoration(labelText: 'Meal state'), items: const [DropdownMenuItem(value: 'planned', child: Text('Plan for later')), DropdownMenuItem(value: 'eaten', child: Text('Already eaten'))], onChanged: (v) => update(() => mealStatus = v!))],
         const SizedBox(height: 12),
         TextField(controller: first, keyboardType: kind == 'food' ? TextInputType.text : TextInputType.number, decoration: InputDecoration(labelText: kind == 'glucose' ? 'Glucose mg/dL' : kind == 'food' ? 'Food items' : 'Carbs g')),
         if (kind != 'glucose') ...[const SizedBox(height: 12), TextField(controller: second, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: kind == 'food' ? 'Carbs g' : 'Pre-meal glucose mg/dL'))],
@@ -376,15 +378,32 @@ class _PatientPortalState extends State<PatientPortal> {
         if (kind == 'glucose' && (firstNumber == null || firstNumber < 20 || firstNumber > 600)) return;
         if (kind == 'food' && (first.text.trim().isEmpty || (double.tryParse(second.text) ?? -1) < 0)) return;
         if (kind == 'bolus' && ((firstNumber ?? -1) < 0 || (double.tryParse(second.text) ?? -1) < 20 || (double.tryParse(third.text) ?? -1) < 0)) return;
+        final eventAt = DateTime.now().toUtc().toIso8601String();
         final common = {'id': nextId, 'patientSlug': patientId, 'time': nowLabel};
-        final item = kind == 'glucose' ? {...common, 'value': firstNumber, 'recordedAt': DateTime.now().toUtc().toIso8601String()}
-          : kind == 'food' ? {...common, 'patient': profile['fullName'], 'meal': meal, 'items': first.text.trim(), 'carbs': '${second.text}g', 'impact': 'Pending CGM impact', 'status': 'Recorded'}
-          : {...common, 'patient': profile['fullName'], 'meal': meal, 'carbs': '${first.text}g', 'preMeal': '${second.text} mg/dL', 'recommended': 'Doctor review', 'recorded': '${third.text} U'};
+        final item = kind == 'glucose' ? {...common, 'value': firstNumber, 'recordedAt': eventAt}
+          : kind == 'food' ? {...common, 'patient': profile['fullName'], 'meal': meal, 'items': first.text.trim(), 'carbs': '${second.text}g', 'impact': 'Pending CGM impact', 'status': mealStatus, 'plannedEatingAt': eventAt, if (mealStatus == 'eaten') ...{'actualEatingAt': eventAt, 'confirmAnnouncedAmount': true}}
+          : {...common, 'patient': profile['fullName'], 'meal': meal, 'carbs': '${first.text}g', 'preMeal': '${second.text} mg/dL', 'recommended': 'Doctor review', 'recorded': '${third.text} U', 'administeredAt': eventAt};
         Navigator.pop(context, item);
       }, child: const Text('Save'))],
     )));
     first.dispose(); second.dispose(); third.dispose();
     if (result != null) await add(kind, result);
+  }
+
+  Future<void> _updateMeal(Map<String, dynamic> item, String status) async {
+    try {
+      final eventAt = DateTime.now().toUtc().toIso8601String();
+      await widget.api.updateMeal('${item['id']}', {
+        'expectedVersion': item['version'],
+        'mutationId': '${DateTime.now().microsecondsSinceEpoch}-${item['id']}-$status',
+        'status': status,
+        if (status == 'eaten') ...{'actualEatingAt': eventAt, 'confirmAnnouncedAmount': true},
+      });
+      await widget.onRefresh();
+      if (mounted) setState(() => actionError = null);
+    } catch (error) {
+      if (mounted) setState(() => actionError = error.toString().replaceFirst('Exception: ', ''));
+    }
   }
 
   Future<void> _requestDoctor() async {

@@ -37,7 +37,7 @@ export async function withTransaction(pool, callback) {
 
 export async function assertDatabaseReady(pool) {
   await pool.query('SELECT 1');
-  const result = await pool.query("SELECT to_regclass('public.users') AS users_table");
+  const result = await pool.query("SELECT to_regclass('users') AS users_table");
   if (!result.rows[0].users_table) {
     throw new Error('Database is reachable but migrations are missing; run npm run db:migrate');
   }

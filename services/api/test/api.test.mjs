@@ -92,9 +92,14 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal((await request('glucose', { token: second, method: 'POST', data: { ...reading, patientSlug: firstId } })).status, 403);
 
     const plannedMealId = `meal-planned-${runId}`;
+    const legacyPlannedMealId = `meal-legacy-${runId}`;
     const zeroMealId = `meal-zero-${runId}`;
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: plannedMealId, patientSlug: firstId, announcedCarbsG: 30, status: 'planned', plannedEatingAt: new Date().toISOString(),
+    } })).status, 200);
+    const legacyTime = new Date().toISOString();
+    assert.equal((await request('food', { token: first, method: 'POST', data: {
+      id: legacyPlannedMealId, patientSlug: firstId, carbs: '45g', status: 'planned', plannedEatingAt: legacyTime,
     } })).status, 200);
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: zeroMealId, patientSlug: firstId, announcedCarbsG: 0, consumedCarbsG: 0, status: 'eaten',
@@ -103,6 +108,49 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     const meals = await db.query('SELECT id,consumed_carbs_g FROM meals WHERE id=ANY($1::text[]) ORDER BY id', [[plannedMealId, zeroMealId]]);
     assert.equal(meals.rows.find((row) => row.id === plannedMealId).consumed_carbs_g, null);
     assert.equal(Number(meals.rows.find((row) => row.id === zeroMealId).consumed_carbs_g), 0);
+    assert.equal((await db.query('SELECT consumed_carbs_g FROM meals WHERE id=$1', [legacyPlannedMealId])).rows[0].consumed_carbs_g, null);
+
+    const confirmed = await request(`food/${plannedMealId}`, { token: first, method: 'PATCH', data: {
+      expectedVersion: 1, mutationId: `confirm-${runId}`, status: 'eaten', actualEatingAt: legacyTime, confirmAnnouncedAmount: true,
+    } });
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+    assert.equal(confirmed.body.meal.version, 2);
+    assert.equal(confirmed.body.meal.consumedCarbsG, 30);
+    assert.equal((await request(`food/${plannedMealId}`, { token: first, method: 'PATCH', data: {
+      expectedVersion: 1, mutationId: `confirm-${runId}`, status: 'eaten', actualEatingAt: legacyTime, confirmAnnouncedAmount: true,
+    } })).status, 200);
+    assert.equal((await request(`food/${plannedMealId}`, { token: first, method: 'PATCH', data: {
+      expectedVersion: 1, mutationId: `confirm-${runId}`, status: 'eaten', actualEatingAt: legacyTime, consumedCarbsG: 12,
+    } })).status, 409);
+    assert.equal((await request(`food/${plannedMealId}`, { token: first, method: 'PATCH', data: {
+      expectedVersion: 1, mutationId: `stale-${runId}`, status: 'eaten', actualEatingAt: legacyTime, consumedCarbsG: 10,
+    } })).status, 409);
+    assert.equal((await request(`food/${legacyPlannedMealId}`, { token: second, method: 'PATCH', data: {
+      expectedVersion: 1, mutationId: `forbidden-${runId}`, status: 'cancelled',
+    } })).status, 403);
+    const cancelled = await request(`food/${legacyPlannedMealId}`, { token: first, method: 'PATCH', data: {
+      expectedVersion: 1, mutationId: `cancel-${runId}`, status: 'cancelled',
+    } });
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.meal.consumedCarbsG, null);
+    const snapMeal = (await request('snapshot', { token: first })).body.food.find((item) => item.id === plannedMealId);
+    assert.equal(snapMeal.status, 'eaten');
+    assert.equal(snapMeal.version, 2);
+
+    for (const invalid of [-1, false, ' ', '1x', 'NaN', 'Infinity']) {
+      const invalidResult = await request('food', { token: first, method: 'POST', data: {
+        id: `invalid-${String(invalid)}-${runId}`, patientSlug: firstId, announcedCarbsG: invalid,
+        status: 'planned', plannedEatingAt: legacyTime,
+      } });
+      assert.equal(invalidResult.status, 400, `accepted invalid numeric ${String(invalid)}`);
+    }
+    assert.equal((await request('glucose', { token: first, method: 'POST', data: {
+      id: `no-zone-${runId}`, patientSlug: firstId, value: 100, recordedAt: '2026-01-01T10:00:00',
+    } })).status, 400);
+    assert.equal((await request('bolus', { token: first, method: 'POST', data: {
+      id: `bolus-${runId}`, patientSlug: firstId, recorded: '2 U', administeredAt: legacyTime,
+    } })).status, 200);
+    assert.equal((await db.query('SELECT administered_at FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].administered_at.toISOString(), legacyTime);
 
     const contactOne = await request('emergency-contacts', { token: first, method: 'POST', data: { contactName: 'One', relationship: 'Parent', phoneNumber: '+201111111111', isPrimary: true } });
     assert.equal(contactOne.status, 201);
@@ -145,16 +193,24 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
 
     const directory = await mkdtemp(join(tmpdir(), 'glucotwin-import-'));
     const importId = `imported-${runId}`;
+    const importMealId = `imported-meal-${runId}`;
     const fixture = join(directory, 'data.json');
     await writeFile(fixture, JSON.stringify({
       accounts: [{ id: importId, role: 'patient', email: `${importId}@example.test`, passwordHash: passwordHash('import-password'), patientProfile: { fullName: 'Imported Patient' } }],
-      assignments: [], food: [], bolus: [], glucose: [], messages: [], ratings: [],
+      assignments: [], food: [{ id: importMealId, patientSlug: importId, meal: 'Legacy meal', items: 'Unknown',
+        carbs: '20g', status: 'Recorded', plannedEatingAt: '2026-06-01T12:00:00+02:00' }],
+      bolus: [], glucose: [], messages: [], ratings: [],
     }));
     for (let pass = 0; pass < 2; pass++) {
       const imported = spawn(process.execPath, [importFile, fixture], { env: { ...process.env, DATABASE_URL: databaseUrl } });
       assert.equal(await new Promise((resolve) => imported.once('exit', resolve)), 0);
     }
     assert.equal(Number((await db.query('SELECT count(*) FROM users WHERE id=$1', [importId])).rows[0].count), 1);
+    const importedMeal = (await db.query('SELECT status,actual_eating_at,consumed_carbs_g,confirmation_provenance FROM meals WHERE id=$1', [importMealId])).rows[0];
+    assert.equal(importedMeal.status, 'planned');
+    assert.equal(importedMeal.actual_eating_at, null);
+    assert.equal(importedMeal.consumed_carbs_g, null);
+    assert.equal(importedMeal.confirmation_provenance.source, 'ambiguous_legacy_import_requires_review');
   } finally {
     if (server) await stopServer(server);
     await db.end();

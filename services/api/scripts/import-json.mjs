@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createPool, databaseUrl, withTransaction } from '../db.mjs';
-import { optionalNumber, strictUnit } from '../lib.mjs';
+import { optionalNumber, strictUnit, timestamp } from '../lib.mjs';
 import { accountById, publicAccount, updateProfile } from '../store.mjs';
 
 const sourcePath = process.argv.find((value, index) => index > 1 && !value.startsWith('--'));
@@ -14,7 +14,10 @@ for (const name of arrays) if (!Array.isArray(source[name])) issues.push(`${name
 const demoIds = new Set(['f1','f2','f3','f4','b1','b2','b3','demo-message-patient','demo-message-doctor']);
 const eventTime = (item, field, collection) => {
   const value = item[field];
-  if (value && !Number.isNaN(new Date(value).getTime())) return new Date(value).toISOString();
+  if (value) {
+    try { return timestamp(value, `${collection} ${field}`); }
+    catch (error) { issues.push(`${collection}/${item.id || '?'}: ${error.message}`); return null; }
+  }
   if (demoIds.has(item.id) && /^\d\d:\d\d$/.test(item.time || '')) return `2026-01-01T${item.time}:00Z`;
   issues.push(`${collection}/${item.id || '?'}: missing unambiguous timezone-aware event timestamp`);
   return null;
@@ -22,14 +25,28 @@ const eventTime = (item, field, collection) => {
 const parsed = { food: [], bolus: [], glucose: [], messages: [] };
 for (const item of source.glucose || []) {
   const when = eventTime(item, 'recordedAt', 'glucose');
-  const value = optionalNumber(item.value);
-  if (value === null) issues.push(`glucose/${item.id || '?'}: invalid value`);
+  let value = null;
+  try { value = optionalNumber(item.value, 'Glucose'); } catch (error) { issues.push(`glucose/${item.id || '?'}: ${error.message}`); }
+  if (value === null) issues.push(`glucose/${item.id || '?'}: missing value`);
   parsed.glucose.push({ item, when, value });
 }
 for (const item of source.food || []) {
   let carbs = null;
-  try { carbs = strictUnit(item.carbs, 'g', 'carbohydrates'); } catch (error) { issues.push(`food/${item.id || '?'}: ${error.message}`); }
-  parsed.food.push({ item, when: eventTime(item, 'plannedEatingAt', 'food'), carbs });
+  try { carbs = item.carbs !== undefined ? strictUnit(item.carbs, 'g', 'carbohydrates') : optionalNumber(item.announcedCarbsG, 'carbohydrates'); }
+  catch (error) { issues.push(`food/${item.id || '?'}: ${error.message}`); }
+  if (carbs === null) issues.push(`food/${item.id || '?'}: missing carbohydrates`);
+  const synthetic = demoIds.has(item.id);
+  const status = synthetic ? 'eaten' : ['planned', 'cancelled'].includes(item.status) ? item.status :
+    item.status === 'eaten' && item.actualEatingAt && (item.consumedCarbsG !== undefined || item.confirmAnnouncedAmount === true) ? 'eaten' : 'planned';
+  const plannedAt = eventTime(item, 'plannedEatingAt', 'food');
+  const actualAt = status === 'eaten' ? (synthetic ? plannedAt : eventTime(item, 'actualEatingAt', 'food')) : null;
+  let consumed = null;
+  if (status === 'eaten') {
+    try { consumed = synthetic || item.confirmAnnouncedAmount === true ? carbs : optionalNumber(item.consumedCarbsG, 'consumed carbohydrates'); }
+    catch (error) { issues.push(`food/${item.id || '?'}: ${error.message}`); }
+    if (consumed === null) issues.push(`food/${item.id || '?'}: eaten meal is missing confirmed consumption`);
+  }
+  parsed.food.push({ item, plannedAt, actualAt, carbs, consumed, status, synthetic });
 }
 for (const item of source.bolus || []) {
   let amount = null;
@@ -89,9 +106,10 @@ if (issues.length) {
       }
       for (const { item, when, value } of parsed.glucose) await insertLegacy('glucose_readings', item, () => db.query(`INSERT INTO glucose_readings
         (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,'imported',$5)`, [item.id,item.patientSlug,when,value,JSON.stringify(item)]));
-      for (const { item, when, carbs } of parsed.food) await insertLegacy('meals', item, () => db.query(`INSERT INTO meals
-        (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,legacy_payload)
-        VALUES($1,$2,$3,$4,$5,$6,'eaten',$6,$5,'user_chosen',$7)`, [item.id,item.patientSlug,item.meal,item.items,carbs,when,JSON.stringify(item)]));
+      for (const { item, plannedAt, actualAt, carbs, consumed, status, synthetic } of parsed.food) await insertLegacy('meals', item, () => db.query(`INSERT INTO meals
+        (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,confirmation_provenance,legacy_payload)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'user_chosen',$10,$11)`, [item.id,item.patientSlug,item.meal,item.items,carbs,plannedAt,status,actualAt,consumed,
+        JSON.stringify(status === 'eaten' ? { source: synthetic ? 'documented_synthetic_fixture' : item.confirmAnnouncedAmount === true ? 'imported_patient_confirmation' : 'imported_explicit_actual' } : { source: 'ambiguous_legacy_import_requires_review' }),JSON.stringify(item)]));
       for (const { item, when, amount } of parsed.bolus) await insertLegacy('insulin_doses', item, () => db.query(`INSERT INTO insulin_doses
         (id,patient_id,administered_units,administered_at,decision_source,confirmation_provenance,legacy_payload)
         VALUES($1,$2,$3,$4,'user_decided',$5,$6)`, [item.id,item.patientSlug,amount,when,JSON.stringify({ source: 'legacy_import' }),JSON.stringify(item)]));

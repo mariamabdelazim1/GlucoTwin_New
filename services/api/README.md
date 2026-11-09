@@ -15,6 +15,12 @@ npm run db:seed
 npm run dev:api
 ```
 
+`db:migrate` is also the upgrade command for an existing database. It records and skips
+`001_initial.sql`, then applies `002_repair_triggers_and_meals.sql`; do not reset or
+recreate the database. For migration regression setup only, the runner supports
+`node scripts/migrate.mjs --test --through=001_initial.sql` against the dedicated
+`TEST_DATABASE_URL`.
+
 `db:seed` is explicit, idempotent development data. Production startup never creates demo accounts or records. Change every example credential and `TOKEN_SECRET` outside local development.
 
 For a legacy-data migration, run `db:migrate` and then `db:import` on an otherwise unseeded target database. Do not seed first: the importer deliberately rejects an existing ID whose password hash or content differs instead of overwriting it.
@@ -75,14 +81,78 @@ Traceability:
 
 All event times use `timestamptz`. Database triggers enforce patient consistency across linked predictions, recommendations, responses, meals, and administered doses. Accepting a recommendation inserts only a response; it never creates an insulin dose or meal.
 
+Medical event timestamps sent to the API must be complete ISO 8601 values ending in
+`Z` or an explicit offset, for example `2026-11-09T10:15:00Z` or
+`2026-11-09T12:15:00+02:00`. Glucose requires `recordedAt`, insulin requires
+`administeredAt`, and meals require `plannedEatingAt` plus `actualEatingAt` when eaten.
+The clients capture these once when the patient logs or confirms the event, so a retry
+does not turn network receipt time into medical event time.
+
+## Meal lifecycle and updates
+
+Valid normalized combinations are:
+
+- `planned`: `actualEatingAt` and `consumedCarbsG` are null.
+- `eaten`: both fields are present. `consumedCarbsG` may be zero. Send either an
+  explicit value or `confirmAnnouncedAmount: true` to copy the announced amount.
+- `cancelled`: both fields are null. A partially eaten meal is `eaten` with the actual
+  partial amount, not `cancelled`.
+
+Creating a planned meal (the legacy `carbs` string remains supported but is announcement
+only):
+
+```http
+POST /api/food
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"id":"meal-client-1","patientSlug":"patient-1","carbs":"45g","status":"planned","plannedEatingAt":"2026-11-09T18:00:00+02:00"}
+```
+
+Confirm it without retyping the amount:
+
+```http
+PATCH /api/food/meal-client-1
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"expectedVersion":1,"mutationId":"device-operation-123","status":"eaten","actualEatingAt":"2026-11-09T18:07:00+02:00","confirmAnnouncedAmount":true}
+```
+
+Use a stable, unique `mutationId` when retrying the same update. The same mutation is
+safe to resend; a different update with an old `expectedVersion` returns HTTP 409.
+Only the owning patient can update a meal. Corrections retain prior medical values in
+`meal_revisions`; general audit metadata contains only versions, transition, and the
+mutation identifier.
+
+Supplied numeric values accept finite nonnegative JSON numbers or plain decimal strings.
+The documented legacy unit strings `45g` and `2 U` are accepted by their respective
+fields. Booleans, blank strings, malformed strings, negatives, NaN, and infinity are
+rejected. Omitted optional values become SQL `NULL`; explicit zero remains zero.
+
+Older rows that may have had consumption inferred solely from a legacy `carbs` field
+are not rewritten automatically. Review them with a read-only query such as:
+
+```sql
+SELECT id, patient_id, announced_carbs_g, consumed_carbs_g, actual_eating_at, legacy_payload
+FROM meals
+WHERE status = 'eaten'
+  AND legacy_payload ? 'carbs'
+  AND confirmation_provenance = '{}'::jsonb;
+```
+
+Resolve each row from patient/source evidence through an audited correction workflow.
+The JSON importer now keeps ambiguous real legacy meals planned with null consumption;
+only the explicitly documented demo IDs use the fixed synthetic fixture date and amount.
+
 ## Access and conversation history
 
 The current one-doctor workflow is preserved. Requesting a different doctor ends the former active assignment and conversation before creating the new pending assignment. Records are retained for history, but the snapshot API exposes messages only from the current active conversation. Therefore a newly assigned doctor cannot see a former doctor's conversation, and the former doctor loses snapshot access after reassignment. A future audited history endpoint can expose retained conversations under a separately approved policy.
 
 ## Compatibility and limitations
 
-Existing `/api` response shapes are retained for the React and Flutter clients. Legacy food and bolus routes accept only strict values such as `20g` and `2 U`; their original payload is retained while normalized columns support future model-input preparation. New meal payloads preserve `consumedCarbsG: null`; `confirmAnnouncedAmount: true` is required to copy an announced amount into confirmed consumption.
+Existing `/api` response shapes are retained for the React and Flutter clients. Snapshots additionally return normalized meal status, planned/actual times, announced/consumed carbohydrates, and version; normalized columns override stale values in `legacy_payload`.
 
 The existing admin screens still use frontend/demo state. This migration does not create an admin role, an admin provisioning API, or broad administrative access. New doctor accounts cannot be self-registered through `/api/auth/bridge`; they must be explicitly provisioned in a controlled process.
 
-Durable offline conflict resolution is not claimed. Client-provided IDs make retries idempotent, while conflicting ownership or content returns HTTP 409.
+Client-provided IDs keep identical creates idempotent, while a conflicting create returns HTTP 409. Meal edits use optimistic versions and retry-safe mutation IDs; broader durable offline conflict resolution is not claimed.

@@ -45,10 +45,24 @@ export async function loginAccount(email: string, password: string, role: 'patie
 
 export const getSnapshot = () => api<SyncSnapshot>('snapshot');
 export const syncItem = (kind: 'food' | 'bolus' | 'glucose' | 'messages', item: unknown) => api<{ ok: boolean }>(kind, 'POST', item);
+export const updateMeal = (id: string, update: unknown) => api<{ ok: boolean; meal: FoodEntry }>(`food/${encodeURIComponent(id)}`, 'PATCH', update);
 export const syncAssignment = (patientId: string, status: 'accepted' | 'declined') => api('assignment', 'POST', { patientId, status });
 export const syncRating = (doctorId: string, score: number) => api<{ ratings: DoctorRating[] }>('rating', 'POST', { doctorId, score });
 
-export function mergeById<T extends { id: string }>(local: T[], remote: T[]) {
-  const known = new Set(local.map((item) => item.id));
-  return remote.length && remote.some((item) => !known.has(item.id)) ? [...remote.filter((item) => !known.has(item.id)), ...local] : local;
+export function mergeById<T extends { id: string; version?: number }>(local: T[], remote: T[]) {
+  if (!remote.length) return local;
+  const remoteById = new Map(remote.map((item) => [item.id, item]));
+  let changed = false;
+  const merged = local.map((item) => {
+    const next = remoteById.get(item.id);
+    if (!next) return item;
+    remoteById.delete(item.id);
+    const replace = next.version !== undefined
+      ? item.version === undefined || next.version >= item.version
+      : JSON.stringify(next) !== JSON.stringify(item);
+    if (replace && JSON.stringify(next) !== JSON.stringify(item)) changed = true;
+    return replace ? next : item;
+  });
+  if (remoteById.size) changed = true;
+  return changed ? [...remoteById.values(), ...merged] : local;
 }

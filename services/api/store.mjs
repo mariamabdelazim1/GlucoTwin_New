@@ -1,4 +1,4 @@
-import { ApiError, newId, optionalNumber, strictUnit, timestamp } from './lib.mjs';
+import { ApiError, contentHash, finiteNonnegative, newId, optionalNumber, strictUnit, timestamp } from './lib.mjs';
 import { withTransaction } from './db.mjs';
 
 const text = (value) => value === undefined || value === null ? '' : String(value);
@@ -45,6 +45,24 @@ export async function accountByEmail(db, email, role) {
 
 export const publicAccount = accountFromRow;
 
+export const mealJson = (row) => ({
+  ...(row.legacy_payload || {}),
+  id: row.id,
+  patientSlug: row.patient_id,
+  meal: row.meal_name || row.legacy_payload?.meal || '',
+  items: row.description || row.legacy_payload?.items || '',
+  carbs: row.announced_carbs_g === null ? '' : `${Number(row.announced_carbs_g)}g`,
+  announcedCarbsG: row.announced_carbs_g === null ? null : Number(row.announced_carbs_g),
+  consumedCarbsG: row.consumed_carbs_g === null ? null : Number(row.consumed_carbs_g),
+  plannedEatingAt: row.planned_eating_at.toISOString(),
+  actualEatingAt: row.actual_eating_at?.toISOString() || null,
+  status: row.status,
+  version: row.version,
+  updatedAt: row.updated_at.toISOString(),
+  confirmationProvenance: row.confirmation_provenance || {},
+  time: row.legacy_payload?.time || row.planned_eating_at.toISOString(),
+});
+
 export async function updateProfile(db, userId, role, profile = {}) {
   if (role === 'patient') {
     await db.query(`INSERT INTO patient_profiles(
@@ -58,9 +76,9 @@ export async function updateProfile(db, userId, role, profile = {}) {
       medications=EXCLUDED.medications, allergies=EXCLUDED.allergies,
       legacy_emergency_contact=EXCLUDED.legacy_emergency_contact,
       selected_doctor_id=COALESCE(EXCLUDED.selected_doctor_id, patient_profiles.selected_doctor_id)`, [
-      userId, profile.fullName || 'Patient', optionalNumber(profile.age), optionalNumber(profile.weight),
-      optionalNumber(profile.height), profile.diabetesType || null, profile.insulinPlan || null,
-      optionalNumber(profile.diagnosisYear), profile.medications || null, profile.allergies || null,
+      userId, profile.fullName || 'Patient', optionalNumber(profile.age, 'Age'), optionalNumber(profile.weight, 'Weight'),
+      optionalNumber(profile.height, 'Height'), profile.diabetesType || null, profile.insulinPlan || null,
+      optionalNumber(profile.diagnosisYear, 'Diagnosis year'), profile.medications || null, profile.allergies || null,
       profile.emergencyContact || null, profile.selectedDoctorId || null,
     ]);
   } else {
@@ -73,7 +91,7 @@ export async function updateProfile(db, userId, role, profile = {}) {
       years_experience=EXCLUDED.years_experience, medical_school=EXCLUDED.medical_school,
       qualifications=EXCLUDED.qualifications, bio=EXCLUDED.bio, certificates=EXCLUDED.certificates,
       papers=EXCLUDED.papers, photo=EXCLUDED.photo, documents=EXCLUDED.documents`, [
-      userId, profile.fullName || 'Doctor', profile.specialty || null, optionalNumber(profile.yearsExperience),
+      userId, profile.fullName || 'Doctor', profile.specialty || null, optionalNumber(profile.yearsExperience, 'Years of experience'),
       profile.medicalSchool || null, profile.qualifications || null, profile.bio || null,
       JSON.stringify(profile.certificates || []), JSON.stringify(profile.papers || []), profile.photo || null,
       JSON.stringify(profile.documents || []),
@@ -127,9 +145,7 @@ export async function snapshot(db, user) {
     value: Number(row.glucose_mg_dl), recordedAt: row.measured_at.toISOString(),
     time: row.legacy_payload?.time || row.measured_at.toISOString(),
   }));
-  const food = (await queryVisible(`SELECT * FROM meals WHERE patient_id=ANY($1::text[]) ORDER BY planned_eating_at DESC`)).map((row) => ({
-    ...(row.legacy_payload || {}), id: row.id, patientSlug: row.patient_id,
-  }));
+  const food = (await queryVisible(`SELECT * FROM meals WHERE patient_id=ANY($1::text[]) ORDER BY planned_eating_at DESC`)).map(mealJson);
   const bolus = (await queryVisible(`SELECT * FROM insulin_doses WHERE patient_id=ANY($1::text[]) ORDER BY administered_at DESC`)).map((row) => ({
     ...(row.legacy_payload || {}), id: row.id, patientSlug: row.patient_id,
   }));
@@ -203,15 +219,15 @@ export async function addPatientRecord(pool, kind, item, user) {
   return withTransaction(pool, async (db) => {
     let created = false;
     if (kind === 'glucose') {
-      const value = optionalNumber(item.value ?? item.glucoseMgDl);
+      const value = optionalNumber(item.value ?? item.glucoseMgDl, 'Glucose');
       if (value === null) throw new ApiError(400, 'Glucose must be a finite nonnegative number');
-      const measuredAt = timestamp(item.recordedAt ?? item.measuredAt, new Date());
+      const measuredAt = timestamp(item.recordedAt ?? item.measuredAt, 'Glucose recordedAt');
       created = await idempotentInsert(db, 'glucose_readings', item.id, user.id, item, () => db.query(`INSERT INTO glucose_readings
         (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,$5,$6)`,
         [item.id, user.id, measuredAt, value, item.source || 'manual', JSON.stringify(item)]));
     } else if (kind === 'bolus') {
       const units = strictUnit(item.administeredUnits ?? item.recorded, 'U', 'Administered insulin');
-      const administeredAt = timestamp(item.administeredAt, new Date());
+      const administeredAt = timestamp(item.administeredAt, 'Insulin administeredAt');
       created = await idempotentInsert(db, 'insulin_doses', item.id, user.id, item, () => db.query(`INSERT INTO insulin_doses
         (id,patient_id,administered_units,administered_at,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [item.id, user.id, units, administeredAt,
@@ -219,22 +235,98 @@ export async function addPatientRecord(pool, kind, item, user) {
         JSON.stringify(item.confirmationProvenance || { source: 'patient_log' }), JSON.stringify(item)]));
     } else if (kind === 'food') {
       const legacy = Object.hasOwn(item, 'carbs');
-      const announced = legacy ? strictUnit(item.carbs, 'g', 'Announced carbohydrates') : optionalNumber(item.announcedCarbsG);
-      const status = item.status && ['planned', 'eaten', 'cancelled'].includes(item.status) ? item.status : legacy ? 'eaten' : 'planned';
-      const plannedAt = timestamp(item.plannedEatingAt, new Date());
-      const actualAt = status === 'eaten' ? timestamp(item.actualEatingAt, new Date()) : null;
-      let consumed = optionalNumber(item.consumedCarbsG);
+      const announced = legacy ? strictUnit(item.carbs, 'g', 'Announced carbohydrates') : optionalNumber(item.announcedCarbsG, 'Announced carbohydrates');
+      if (announced === null) throw new ApiError(400, 'Announced carbohydrates are required');
+      const status = ['planned', 'eaten', 'cancelled'].includes(item.status)
+        ? item.status : legacy && (!item.status || !['planned', 'eaten', 'cancelled'].includes(item.status)) ? 'planned' : item.status || 'planned';
+      if (!['planned', 'eaten', 'cancelled'].includes(status)) throw new ApiError(400, 'Meal status must be planned, eaten, or cancelled');
+      const plannedAt = timestamp(item.plannedEatingAt, 'Meal plannedEatingAt');
+      const actualAt = status === 'eaten' ? timestamp(item.actualEatingAt, 'Meal actualEatingAt') : null;
+      let consumed = optionalNumber(item.consumedCarbsG, 'Consumed carbohydrates');
       if (item.confirmAnnouncedAmount === true) consumed = announced;
-      if (legacy) consumed = announced;
+      if (status === 'eaten' && consumed === null) throw new ApiError(400, 'An eaten meal requires consumedCarbsG or confirmAnnouncedAmount=true');
+      if (status !== 'eaten' && (item.consumedCarbsG != null || item.actualEatingAt != null || item.confirmAnnouncedAmount === true)) {
+        throw new ApiError(400, 'Planned and cancelled meals cannot contain confirmed consumption or an actual eating time');
+      }
+      if (status !== 'eaten') consumed = null;
       created = await idempotentInsert(db, 'meals', item.id, user.id, item, () => db.query(`INSERT INTO meals
         (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,
-         consumed_carbs_g,decision_source,recommendation_id,legacy_payload)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [item.id, user.id, item.meal || null,
+         consumed_carbs_g,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [item.id, user.id, item.meal || null,
         item.items || item.description || null, announced, plannedAt, status, actualAt, consumed,
-        item.decisionSource || 'user_chosen', item.recommendationId || null, JSON.stringify(item)]));
+        item.decisionSource || 'user_chosen', item.recommendationId || null,
+        JSON.stringify(status === 'eaten' ? { source: item.confirmAnnouncedAmount === true ? 'patient_confirmed_announced' : 'patient_entered_actual' } : {}), JSON.stringify(item)]));
     } else throw new ApiError(404, 'Unknown record type');
     if (created) await audit(db, user.id, `${kind}.created`, kind, item.id);
     return { ok: true };
+  });
+}
+
+export async function updateMeal(pool, id, input, user) {
+  if (user.role !== 'patient') throw new ApiError(403, 'Patient access required');
+  if (typeof input.mutationId !== 'string' || !input.mutationId.trim()) throw new ApiError(400, 'mutationId is required for retry-safe updates');
+  if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) throw new ApiError(400, 'expectedVersion must be a positive integer');
+  const mutationHash = contentHash(input);
+  return withTransaction(pool, async (db) => {
+    let row = (await db.query('SELECT * FROM meals WHERE id=$1 FOR UPDATE', [id])).rows[0];
+    if (!row) throw new ApiError(404, 'Meal not found');
+    if (row.patient_id !== user.id) throw new ApiError(403, 'Record is not available to this account');
+    const retried = (await db.query('SELECT mutation_hash FROM meal_revisions WHERE meal_id=$1 AND mutation_id=$2', [id, input.mutationId])).rows[0];
+    if (retried) {
+      if (retried.mutation_hash !== mutationHash) throw new ApiError(409, 'mutationId was already used for a different update');
+      return { ok: true, meal: mealJson(row) };
+    }
+    if (row.version !== input.expectedVersion) throw new ApiError(409, `Meal has changed; retry with version ${row.version}`);
+
+    const status = input.status ?? row.status;
+    if (!['planned', 'eaten', 'cancelled'].includes(status)) throw new ApiError(400, 'Meal status must be planned, eaten, or cancelled');
+    if (row.status !== 'planned' && status !== row.status) throw new ApiError(409, 'Only a planned meal can transition to eaten or cancelled');
+    const announced = input.announcedCarbsG === undefined
+      ? row.announced_carbs_g === null ? null : Number(row.announced_carbs_g)
+      : finiteNonnegative(input.announcedCarbsG, 'Announced carbohydrates');
+    const plannedAt = input.plannedEatingAt === undefined
+      ? row.planned_eating_at.toISOString() : timestamp(input.plannedEatingAt, 'Meal plannedEatingAt');
+    let actualAt = null;
+    let consumed = null;
+    let provenance = {};
+    if (status === 'eaten') {
+      actualAt = input.actualEatingAt === undefined && row.actual_eating_at
+        ? row.actual_eating_at.toISOString() : timestamp(input.actualEatingAt, 'Meal actualEatingAt');
+      if (input.confirmAnnouncedAmount === true) {
+        if (announced === null) throw new ApiError(400, 'Cannot confirm a missing announced carbohydrate amount');
+        consumed = announced;
+        provenance = { source: 'patient_confirmed_announced', mutationId: input.mutationId };
+      } else if (input.consumedCarbsG !== undefined) {
+        consumed = finiteNonnegative(input.consumedCarbsG, 'Consumed carbohydrates');
+        provenance = { source: 'patient_entered_actual', mutationId: input.mutationId };
+      } else if (row.status === 'eaten' && row.consumed_carbs_g !== null) {
+        consumed = Number(row.consumed_carbs_g);
+        provenance = row.confirmation_provenance || {};
+      } else throw new ApiError(400, 'An eaten meal requires consumedCarbsG or confirmAnnouncedAmount=true');
+    } else if (input.actualEatingAt != null || input.consumedCarbsG != null || input.confirmAnnouncedAmount === true) {
+      throw new ApiError(400, 'Planned and cancelled meals cannot contain confirmed consumption or an actual eating time');
+    }
+
+    const previous = {
+      status: row.status, mealName: row.meal_name, description: row.description,
+      announcedCarbsG: row.announced_carbs_g === null ? null : Number(row.announced_carbs_g),
+      consumedCarbsG: row.consumed_carbs_g === null ? null : Number(row.consumed_carbs_g),
+      plannedEatingAt: row.planned_eating_at.toISOString(), actualEatingAt: row.actual_eating_at?.toISOString() || null,
+      confirmationProvenance: row.confirmation_provenance || {},
+    };
+    await db.query(`INSERT INTO meal_revisions
+      (id,meal_id,patient_id,changed_by_user_id,mutation_id,mutation_hash,from_version,to_version,previous_values,change_reason)
+      VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8,$9)`, [newId('mealrev'), id, user.id, input.mutationId, mutationHash,
+      row.version, row.version + 1, JSON.stringify(previous), input.changeReason || null]);
+    row = (await db.query(`UPDATE meals SET meal_name=$2,description=$3,announced_carbs_g=$4,
+      planned_eating_at=$5,status=$6,actual_eating_at=$7,consumed_carbs_g=$8,
+      confirmation_provenance=$9,version=version+1 WHERE id=$1 RETURNING *`, [id,
+      input.meal ?? row.meal_name, input.items ?? input.description ?? row.description, announced,
+      plannedAt, status, actualAt, consumed, JSON.stringify(provenance)])).rows[0];
+    await audit(db, user.id, 'food.updated', 'food', id, {
+      fromVersion: row.version - 1, toVersion: row.version, mutationId: input.mutationId, transition: `${previous.status}->${status}`,
+    });
+    return { ok: true, meal: mealJson(row) };
   });
 }
 
@@ -256,7 +348,7 @@ export async function addMessage(pool, item, user) {
     }
     await db.query(`INSERT INTO messages(id,conversation_id,sender_id,body,sent_at,is_read,legacy_payload)
       VALUES($1,$2,$3,$4,$5,$6,$7)`, [item.id, conversation.id, user.id, item.text,
-      timestamp(item.sentAt, new Date()), item.unread === false, JSON.stringify(item)]);
+      item.sentAt ? timestamp(item.sentAt, 'Message sentAt') : new Date(), item.unread === false, JSON.stringify(item)]);
     await audit(db, user.id, 'message.created', 'message', item.id, { conversationId: conversation.id });
     return { ok: true };
   });

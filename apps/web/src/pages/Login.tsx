@@ -51,8 +51,10 @@ export function Login({ mode = 'doctor', accounts, ratings, onSignIn, onRegister
       return;
     }
     const id = crypto.randomUUID();
+    const patientPayload: Partial<PatientProfile> = { ...patient };
+    if (!patientPayload.diagnosisYear?.trim()) delete patientPayload.diagnosisYear;
     const account: Account = role === 'patient'
-      ? { id, role, email: email.trim().toLowerCase(), password, patientProfile: patient }
+      ? { id, role, email: email.trim().toLowerCase(), password, patientProfile: patientPayload as PatientProfile }
       : { id, role, email: email.trim().toLowerCase(), password, doctorProfile: { ...doctor, certificates: certificates.split('\n').map((item) => item.trim()).filter(Boolean), papers: papers.split('\n').map((item) => item.trim()).filter(Boolean) } };
     setError(await onRegister(account) ?? '');
   };

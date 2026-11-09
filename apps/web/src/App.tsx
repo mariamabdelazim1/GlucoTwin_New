@@ -166,6 +166,7 @@ export default function App() {
     const upload = <T extends { id: string; patientSlug: string }>(kind: 'food' | 'bolus' | 'glucose' | 'messages', entries: T[]) => {
       for (const item of entries) {
         if (sent.current[kind].has(item.id)) continue;
+        if (kind === 'food' && 'version' in item && typeof item.version === 'number') { sent.current.food.add(item.id); continue; }
         if (['f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3', 'm1', 'm2', 'm3', 'm4', 'm5'].includes(item.id)) continue;
         if (session.role === 'patient' && item.patientSlug !== session.id) continue;
         if (kind === 'messages' && (!('from' in item) || item.from !== session.role)) continue;

@@ -3,7 +3,7 @@ import { Activity, ArrowLeft, Droplets, LayoutDashboard, MessageSquare, Plus, Re
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { Account } from '../types';
-import { getSnapshot, loginAccount, syncItem } from '../utils/sync';
+import { getSnapshot, loginAccount, syncItem, updateMeal } from '../utils/sync';
 import type { SyncSnapshot } from '../utils/sync';
 
 type Tab = 'overview' | 'record' | 'care' | 'profile';
@@ -26,6 +26,7 @@ export function MobilePreview({ existingPatient }: { existingPatient?: Account }
   const [carbs, setCarbs] = useState('');
   const [preMeal, setPreMeal] = useState('');
   const [units, setUnits] = useState('');
+  const [mealStatus, setMealStatus] = useState<'planned' | 'eaten'>('planned');
   const [draft, setDraft] = useState('');
 
   const refresh = useCallback(async () => {
@@ -65,13 +66,24 @@ export function MobilePreview({ existingPatient }: { existingPatient?: Account }
       setValue('');
     } else if (mode === 'food') {
       if (!items.trim() || Number(carbs) < 0 || carbs === '') return;
-      await post('food', { patient: snapshot.account.patientProfile?.fullName, meal, items: items.trim(), carbs: `${carbs}g`, impact: 'Pending CGM impact', status: 'Recorded' });
+      const eventAt = new Date().toISOString();
+      await post('food', { patient: snapshot.account.patientProfile?.fullName, meal, items: items.trim(), carbs: `${carbs}g`, impact: 'Pending CGM impact', status: mealStatus, plannedEatingAt: eventAt,
+        ...(mealStatus === 'eaten' ? { actualEatingAt: eventAt, confirmAnnouncedAmount: true } : {}) });
       setItems(''); setCarbs('');
     } else {
       if (carbs === '' || preMeal === '' || units === '' || Number(carbs) < 0 || Number(preMeal) < 20 || Number(units) < 0) return;
-      await post('bolus', { patient: snapshot.account.patientProfile?.fullName, meal, carbs: `${carbs}g`, preMeal: `${preMeal} mg/dL`, recommended: 'Doctor review', recorded: `${units} U` });
+      await post('bolus', { patient: snapshot.account.patientProfile?.fullName, meal, carbs: `${carbs}g`, preMeal: `${preMeal} mg/dL`, recommended: 'Doctor review', recorded: `${units} U`, administeredAt: new Date().toISOString() });
       setCarbs(''); setPreMeal(''); setUnits('');
     }
+  };
+  const changeMeal = async (id: string, version: number, status: 'eaten' | 'cancelled') => {
+    setBusy(true);
+    try {
+      await updateMeal(id, { expectedVersion: version, mutationId: crypto.randomUUID(), status,
+        ...(status === 'eaten' ? { actualEatingAt: new Date().toISOString(), confirmAnnouncedAmount: true } : {}) });
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update meal.'); }
+    setBusy(false);
   };
 
   if (!snapshot) return <main className="min-h-screen bg-clinical-bg px-4 py-10 text-clinical-text"><div className="mx-auto max-w-[420px]">
@@ -123,11 +135,12 @@ export function MobilePreview({ existingPatient }: { existingPatient?: Account }
           <form onSubmit={record} className={`${panel} space-y-3`}>
             {mode !== 'glucose' ? <select value={meal} onChange={(event) => setMeal(event.target.value)} className={input} aria-label="Meal"><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option></select> : null}
             {mode === 'glucose' ? <input type="number" min="20" max="600" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Glucose mg/dL" aria-label="Glucose mg/dL" className={input} required /> : mode === 'food' ? <input value={items} onChange={(event) => setItems(event.target.value)} placeholder="Food items" aria-label="Food items" className={input} required /> : null}
+            {mode === 'food' ? <select value={mealStatus} onChange={(event) => setMealStatus(event.target.value as 'planned' | 'eaten')} className={input} aria-label="Meal state"><option value="planned">Plan for later</option><option value="eaten">Already eaten</option></select> : null}
             {mode !== 'glucose' ? <input type="number" min="0" value={carbs} onChange={(event) => setCarbs(event.target.value)} placeholder="Carbs g" aria-label="Carbs g" className={input} required /> : null}
             {mode === 'bolus' ? <><input type="number" min="20" value={preMeal} onChange={(event) => setPreMeal(event.target.value)} placeholder="Pre-meal glucose mg/dL" aria-label="Pre-meal glucose mg/dL" className={input} required /><input type="number" min="0" step="0.1" value={units} onChange={(event) => setUnits(event.target.value)} placeholder="Bolus units" aria-label="Bolus units" className={input} required /></> : null}
             <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2.5 font-semibold text-white disabled:opacity-50"><Plus size={17} /> Save</button>
           </form>
-          <section className={panel}><h2 className="font-semibold">Recent {mode === 'glucose' ? 'readings' : mode === 'food' ? 'food' : 'bolus logs'}</h2><div className="mt-3 divide-y divide-clinical-border">{records.slice(0, 8).map((entry) => <div key={entry.id} className="flex justify-between gap-3 py-3 text-sm"><div><strong>{mode === 'glucose' ? `${'value' in entry ? entry.value : ''} mg/dL` : mode === 'food' ? `${'meal' in entry ? entry.meal : ''}: ${'items' in entry ? entry.items : ''}` : `${'recorded' in entry ? entry.recorded : ''} at ${'meal' in entry ? entry.meal : ''}`}</strong>{mode !== 'glucose' ? <p className="text-clinical-muted">{'carbs' in entry ? entry.carbs : ''} carbs</p> : null}</div><span className="shrink-0 text-clinical-muted">{entry.time}</span></div>)}{records.length === 0 ? <p className="py-3 text-sm text-clinical-muted">Nothing recorded yet.</p> : null}</div></section>
+          <section className={panel}><h2 className="font-semibold">Recent {mode === 'glucose' ? 'readings' : mode === 'food' ? 'food' : 'bolus logs'}</h2><div className="mt-3 divide-y divide-clinical-border">{records.slice(0, 8).map((entry) => <div key={entry.id} className="flex justify-between gap-3 py-3 text-sm"><div><strong>{mode === 'glucose' ? `${'value' in entry ? entry.value : ''} mg/dL` : mode === 'food' ? `${'meal' in entry ? entry.meal : ''}: ${'items' in entry ? entry.items : ''}` : `${'recorded' in entry ? entry.recorded : ''} at ${'meal' in entry ? entry.meal : ''}`}</strong>{mode !== 'glucose' ? <p className="text-clinical-muted">{'carbs' in entry ? entry.carbs : ''} carbs</p> : null}{mode === 'food' && 'status' in entry ? <><p className="capitalize text-clinical-muted">{entry.status}</p>{entry.status === 'planned' && entry.version ? <div className="mt-1 flex gap-2"><button disabled={busy} onClick={() => void changeMeal(entry.id, entry.version!, 'eaten')} className="font-semibold text-clinical-primary">Mark eaten</button><button disabled={busy} onClick={() => void changeMeal(entry.id, entry.version!, 'cancelled')} className="font-semibold text-red-700">Cancel</button></div> : null}</> : null}</div><span className="shrink-0 text-clinical-muted">{entry.time}</span></div>)}{records.length === 0 ? <p className="py-3 text-sm text-clinical-muted">Nothing recorded yet.</p> : null}</div></section>
         </> : null}
         {tab === 'care' ? <><h1 className="text-xl font-bold">Care team</h1><section className={panel}><h2 className="font-semibold">Your doctor</h2><p className="mt-2 font-semibold">{doctor?.doctorProfile?.fullName || 'Doctor request pending'}</p><p className="text-sm text-clinical-muted">{doctor?.doctorProfile?.specialty} · {doctor?.doctorProfile?.yearsExperience} years experience</p><p className="mt-2 text-sm">Request: {assignment?.status || 'pending'}</p></section><section className={panel}><h2 className="font-semibold">Messages</h2>{assignment?.status === 'accepted' ? <><div className="mt-3 space-y-2">{[...snapshot.messages].reverse().map((message) => <div key={message.id} className={`max-w-[88%] rounded-md px-3 py-2 text-sm ${message.from === 'patient' ? 'ml-auto bg-clinical-secondary' : 'border border-clinical-border'}`}>{message.text}</div>)}{snapshot.messages.length === 0 ? <p className="text-sm text-clinical-muted">No messages yet.</p> : null}</div><form onSubmit={sendMessage} className="mt-4 flex gap-2"><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Message your doctor" aria-label="Message your doctor" className={input} /><button disabled={busy || !draft.trim()} aria-label="Send message" title="Send message" className="rounded-md bg-clinical-primary px-3 text-white disabled:opacity-50"><Send size={18} /></button></form></> : <p className="mt-2 text-sm text-clinical-muted">Messaging opens after your doctor accepts your request.</p>}</section></> : null}
         {tab === 'profile' ? <><h1 className="text-xl font-bold">Profile</h1><section className={panel}><h2 className="font-semibold">My information</h2><dl className="mt-3 space-y-3 text-sm">{[['Name', profile?.fullName], ['Email', snapshot.account.email], ['Age', profile?.age], ['Weight', profile?.weight ? `${profile.weight} kg` : ''], ['Height', profile?.height ? `${profile.height} cm` : ''], ['Diabetes type', profile?.diabetesType], ['Insulin plan', profile?.insulinPlan]].map(([label, detail]) => <div key={label} className="flex justify-between gap-4"><dt className="text-clinical-muted">{label}</dt><dd className="text-right font-semibold">{detail || 'Not provided'}</dd></div>)}</dl></section><section className={panel}><h2 className="font-semibold">Basal plan</h2><p className="mt-2 text-sm text-clinical-muted">An AI-suggested basal schedule requires confirmation by your doctor. No confirmed schedule is available here yet.</p></section><Link to="/patient/dashboard" className="inline-flex items-center gap-2 text-sm font-semibold text-clinical-primary"><ArrowLeft size={17} /> Return to website</Link></> : null}
