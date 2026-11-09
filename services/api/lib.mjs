@@ -56,6 +56,15 @@ export function strictUnit(value, unit, label) {
 
 export const contentHash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
+const localSyncFields = ['syncState', 'syncAttempts', 'syncNextAttemptAt', 'syncError'];
+
+export function withoutLocalSyncMetadata(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value || {};
+  const copy = { ...value };
+  for (const field of localSyncFields) delete copy[field];
+  return copy;
+}
+
 export class ApiError extends Error {
   constructor(status, message) {
     super(message);

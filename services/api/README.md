@@ -178,6 +178,12 @@ snapshot replaces the local copy. Only one request per record may be in flight. 
 failures use bounded backoff (at most five attempts), while HTTP 409 conflicts stop
 automatic retry and remain visible for review.
 
+The queue fields `syncState`, `syncAttempts`, `syncNextAttemptAt`, and `syncError`
+are browser-local metadata. They are removed before an upload, never stored in new
+`legacy_payload` values, and filtered from API responses for older rows that already
+contain them. Clinical timestamps, recommendation links, and confirmation provenance
+remain part of the clinical request and response.
+
 Create idempotency compares normalized clinical values and timestamp instants rather than
 raw legacy JSON. Thus `2026-01-01T13:10:00Z` and
 `2026-01-01T13:10:00.000Z` are equivalent, while changed ownership, amounts, event times,
@@ -201,6 +207,8 @@ Local verification from the repository root:
 
 ```bash
 npm run test:api                 # requires dedicated TEST_DATABASE_URL
+npm --workspace apps/web test
+npm run test:web:integration     # simulated DOM + live API; requires TEST_DATABASE_URL with _test in its database name
 npm run build:web
 cd apps/mobile
 flutter analyze lib/patient_app.dart lib/data/sync_api.dart

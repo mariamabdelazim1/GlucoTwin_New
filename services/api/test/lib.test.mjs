@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { finiteNonnegative, optionalNumber, strictUnit, timestamp } from '../lib.mjs';
+import { finiteNonnegative, optionalNumber, strictUnit, timestamp, withoutLocalSyncMetadata } from '../lib.mjs';
 
 test('strict numeric validation distinguishes missing, zero, and invalid input', () => {
   assert.equal(optionalNumber(undefined), null);
@@ -23,4 +23,17 @@ test('medical timestamps require an explicit timezone', () => {
   assert.equal(timestamp('2026-11-09T10:00:00Z'), '2026-11-09T10:00:00.000Z');
   assert.throws(() => timestamp('2026-11-09T10:00:00'), /explicit UTC offset/);
   assert.throws(() => timestamp('not-a-date'), /full ISO timestamp/);
+});
+
+test('local synchronization metadata is removed without changing clinical provenance', () => {
+  const input = {
+    id: 'dose-1', administeredUnits: 2, recommendationId: 'rec-1',
+    confirmationProvenance: { source: 'patient_log' },
+    syncState: 'pending', syncAttempts: 2, syncNextAttemptAt: 1234, syncError: 'offline',
+  };
+  assert.deepEqual(withoutLocalSyncMetadata(input), {
+    id: 'dose-1', administeredUnits: 2, recommendationId: 'rec-1',
+    confirmationProvenance: { source: 'patient_log' },
+  });
+  assert.equal(input.syncState, 'pending');
 });

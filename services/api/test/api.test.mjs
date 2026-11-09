@@ -17,6 +17,10 @@ const importFile = fileURLToPath(new URL('../scripts/import-json.mjs', import.me
 const runId = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const port = 40000 + Math.floor(Math.random() * 10000);
 const base = `http://127.0.0.1:${port}/api/`;
+const localSyncMetadata = { syncState: 'pending', syncAttempts: 2, syncNextAttemptAt: 1234, syncError: 'offline' };
+const assertNoLocalSyncMetadata = (value) => {
+  for (const field of Object.keys(localSyncMetadata)) assert.equal(Object.hasOwn(value, field), false, `${field} leaked from the API`);
+};
 
 const request = async (path, { token, method = 'GET', data } = {}) => {
   const response = await fetch(base + path, {
@@ -140,8 +144,9 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal((await request('rating', { token: first, method: 'POST', data: { doctorId: 'DR-001', score: 5 } })).status, 200);
     assert.equal((await request('rating', { token: doctorOne, method: 'POST', data: { doctorId: 'DR-001', score: 5 } })).status, 403);
 
-    const reading = { id: `reading-${runId}`, patientSlug: firstId, value: 120, recordedAt: '2026-01-01T13:10:00Z' };
+    const reading = { id: `reading-${runId}`, patientSlug: firstId, value: 120, recordedAt: '2026-01-01T13:10:00Z', ...localSyncMetadata };
     assert.equal((await request('glucose', { token: first, method: 'POST', data: reading })).status, 200);
+    assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM glucose_readings WHERE id=$1', [reading.id])).rows[0].legacy_payload);
     assert.equal((await request('glucose', { token: first, method: 'POST', data: { ...reading, recordedAt: '2026-01-01T13:10:00.000Z', time: 'display only' } })).status, 200);
     const concurrentId = `reading-concurrent-${runId}`;
     const concurrent = { ...reading, id: concurrentId };
@@ -152,13 +157,16 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(Number((await db.query('SELECT count(*) FROM glucose_readings WHERE id=$1', [concurrentId])).rows[0].count), 1);
     assert.equal((await request('glucose', { token: first, method: 'POST', data: { ...reading, value: 121 } })).status, 409);
     assert.equal((await request('glucose', { token: second, method: 'POST', data: { ...reading, patientSlug: firstId } })).status, 403);
+    await db.query('UPDATE glucose_readings SET legacy_payload=legacy_payload || $2::jsonb WHERE id=$1', [reading.id, JSON.stringify(localSyncMetadata)]);
+    assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.glucose.find((item) => item.id === reading.id));
 
     const plannedMealId = `meal-planned-${runId}`;
     const legacyPlannedMealId = `meal-legacy-${runId}`;
     const zeroMealId = `meal-zero-${runId}`;
     assert.equal((await request('food', { token: first, method: 'POST', data: {
-      id: plannedMealId, patientSlug: firstId, announcedCarbsG: 30, status: 'planned', plannedEatingAt: new Date().toISOString(),
+      id: plannedMealId, patientSlug: firstId, announcedCarbsG: 30, status: 'planned', plannedEatingAt: new Date().toISOString(), ...localSyncMetadata,
     } })).status, 200);
+    assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM meals WHERE id=$1', [plannedMealId])).rows[0].legacy_payload);
     const legacyTime = '2026-01-02T10:00:00.000Z';
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: legacyPlannedMealId, patientSlug: firstId, carbs: '45g', status: 'planned', plannedEatingAt: legacyTime,
@@ -174,6 +182,8 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(meals.rows.find((row) => row.id === plannedMealId).consumed_carbs_g, null);
     assert.equal(Number(meals.rows.find((row) => row.id === zeroMealId).consumed_carbs_g), 0);
     assert.equal((await db.query('SELECT consumed_carbs_g FROM meals WHERE id=$1', [legacyPlannedMealId])).rows[0].consumed_carbs_g, null);
+    await db.query('UPDATE meals SET legacy_payload=legacy_payload || $2::jsonb WHERE id=$1', [plannedMealId, JSON.stringify(localSyncMetadata)]);
+    assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.food.find((item) => item.id === plannedMealId));
 
     const confirmed = await request(`food/${plannedMealId}`, { token: first, method: 'PATCH', data: {
       expectedVersion: 1, mutationId: `confirm-${runId}`, status: 'eaten', actualEatingAt: legacyTime, confirmAnnouncedAmount: true,
@@ -225,12 +235,15 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
       id: `no-zone-${runId}`, patientSlug: firstId, value: 100, recordedAt: '2026-01-01T10:00:00',
     } })).status, 400);
     assert.equal((await request('bolus', { token: first, method: 'POST', data: {
-      id: `bolus-${runId}`, patientSlug: firstId, recorded: '2 U', administeredAt: legacyTime,
+      id: `bolus-${runId}`, patientSlug: firstId, recorded: '2 U', administeredAt: legacyTime, ...localSyncMetadata,
     } })).status, 200);
     assert.equal((await request('bolus', { token: first, method: 'POST', data: {
       id: `bolus-${runId}`, patientSlug: firstId, administeredUnits: 2, administeredAt: legacyTime.replace('.000Z', 'Z'), time: 'display only',
     } })).status, 200);
     assert.equal((await db.query('SELECT administered_at FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].administered_at.toISOString(), legacyTime);
+    assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].legacy_payload);
+    await db.query('UPDATE insulin_doses SET legacy_payload=legacy_payload || $2::jsonb WHERE id=$1', [`bolus-${runId}`, JSON.stringify(localSyncMetadata)]);
+    assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.bolus.find((item) => item.id === `bolus-${runId}`));
 
     const contactOne = await request('emergency-contacts', { token: first, method: 'POST', data: { contactName: 'One', relationship: 'Parent', phoneNumber: '+201111111111', isPrimary: true } });
     assert.equal(contactOne.status, 201);
@@ -250,9 +263,12 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal((await request(`emergency-contacts/${contactTwo.body.contact.id}`, { token: first, method: 'DELETE' })).status, 200);
     assert.equal((await request('emergency-contacts', { token: first })).body.contacts.length, 1);
 
-    const messageOne = { id: `message-old-${runId}`, patientSlug: firstId, from: 'patient', text: 'Old doctor conversation', sentAt: '2026-01-01T13:10:00Z' };
+    const messageOne = { id: `message-old-${runId}`, patientSlug: firstId, from: 'patient', text: 'Old doctor conversation', sentAt: '2026-01-01T13:10:00Z', ...localSyncMetadata };
     assert.equal((await request('messages', { token: first, method: 'POST', data: messageOne })).status, 200);
     assert.equal((await request('messages', { token: first, method: 'POST', data: { ...messageOne, sentAt: '2026-01-01T13:10:00.000Z', time: 'Now' } })).status, 200);
+    assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM messages WHERE id=$1', [messageOne.id])).rows[0].legacy_payload);
+    await db.query('UPDATE messages SET legacy_payload=legacy_payload || $2::jsonb WHERE id=$1', [messageOne.id, JSON.stringify(localSyncMetadata)]);
+    assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.messages.find((item) => item.id === messageOne.id));
     assert.equal((await request('patient/doctor-request', { token: first, method: 'POST', data: { doctorId: 'DR-002' } })).status, 200);
     assert.equal((await request('snapshot', { token: doctorOne })).body.messages.some((item) => item.id === messageOne.id), false);
     assert.equal((await request('snapshot', { token: doctorTwo })).body.messages.some((item) => item.id === messageOne.id), false);
@@ -289,7 +305,7 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     await writeFile(fixture, JSON.stringify({
       accounts: [{ id: importId, role: 'patient', email: `${importId}@example.test`, passwordHash: passwordHash('import-password'), patientProfile: { fullName: 'Imported Patient' } }],
       assignments: [], food: [{ id: importMealId, patientSlug: importId, meal: 'Legacy meal', items: 'Unknown',
-        carbs: '20g', status: 'Recorded', plannedEatingAt: '2026-06-01T12:00:00+02:00' }],
+        carbs: '20g', status: 'Recorded', plannedEatingAt: '2026-06-01T12:00:00+02:00', ...localSyncMetadata }],
       bolus: [], glucose: [], messages: [], ratings: [{ id: importRatingId, doctorId: 'DR-001', patientId: null, score: 4, source: 'imported' }],
     }));
     for (let pass = 0; pass < 2; pass++) {
@@ -297,11 +313,12 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
       assert.equal(await new Promise((resolve) => imported.once('exit', resolve)), 0);
     }
     assert.equal(Number((await db.query('SELECT count(*) FROM users WHERE id=$1', [importId])).rows[0].count), 1);
-    const importedMeal = (await db.query('SELECT status,actual_eating_at,consumed_carbs_g,confirmation_provenance FROM meals WHERE id=$1', [importMealId])).rows[0];
+    const importedMeal = (await db.query('SELECT status,actual_eating_at,consumed_carbs_g,confirmation_provenance,legacy_payload FROM meals WHERE id=$1', [importMealId])).rows[0];
     assert.equal(importedMeal.status, 'planned');
     assert.equal(importedMeal.actual_eating_at, null);
     assert.equal(importedMeal.consumed_carbs_g, null);
     assert.equal(importedMeal.confirmation_provenance.source, 'ambiguous_legacy_import_requires_review');
+    assertNoLocalSyncMetadata(importedMeal.legacy_payload);
     const importedRating = (await db.query('SELECT patient_id,source FROM doctor_ratings WHERE id=$1', [importRatingId])).rows[0];
     assert.equal(importedRating.patient_id, null);
     assert.equal(importedRating.source, 'imported');

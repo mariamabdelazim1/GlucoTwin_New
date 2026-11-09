@@ -1,7 +1,8 @@
-import { ApiError, contentHash, finiteNonnegative, newId, optionalNumber, strictUnit, timestamp } from './lib.mjs';
+import { ApiError, contentHash, finiteNonnegative, newId, optionalNumber, strictUnit, timestamp, withoutLocalSyncMetadata } from './lib.mjs';
 import { withTransaction } from './db.mjs';
 
 const text = (value) => value === undefined || value === null ? '' : String(value);
+const legacyPayload = (row) => withoutLocalSyncMetadata(row.legacy_payload);
 
 function accountFromRow(row) {
   if (!row) return null;
@@ -45,23 +46,26 @@ export async function accountByEmail(db, email, role) {
 
 export const publicAccount = accountFromRow;
 
-export const mealJson = (row) => ({
-  ...(row.legacy_payload || {}),
-  id: row.id,
-  patientSlug: row.patient_id,
-  meal: row.meal_name || row.legacy_payload?.meal || '',
-  items: row.description || row.legacy_payload?.items || '',
-  carbs: row.announced_carbs_g === null ? '' : `${Number(row.announced_carbs_g)}g`,
-  announcedCarbsG: row.announced_carbs_g === null ? null : Number(row.announced_carbs_g),
-  consumedCarbsG: row.consumed_carbs_g === null ? null : Number(row.consumed_carbs_g),
-  plannedEatingAt: row.planned_eating_at.toISOString(),
-  actualEatingAt: row.actual_eating_at?.toISOString() || null,
-  status: row.status,
-  version: row.version,
-  updatedAt: row.updated_at.toISOString(),
-  confirmationProvenance: row.confirmation_provenance || {},
-  time: row.legacy_payload?.time || row.planned_eating_at.toISOString(),
-});
+export const mealJson = (row) => {
+  const legacy = legacyPayload(row);
+  return {
+    ...legacy,
+    id: row.id,
+    patientSlug: row.patient_id,
+    meal: row.meal_name || legacy.meal || '',
+    items: row.description || legacy.items || '',
+    carbs: row.announced_carbs_g === null ? '' : `${Number(row.announced_carbs_g)}g`,
+    announcedCarbsG: row.announced_carbs_g === null ? null : Number(row.announced_carbs_g),
+    consumedCarbsG: row.consumed_carbs_g === null ? null : Number(row.consumed_carbs_g),
+    plannedEatingAt: row.planned_eating_at.toISOString(),
+    actualEatingAt: row.actual_eating_at?.toISOString() || null,
+    status: row.status,
+    version: row.version,
+    updatedAt: row.updated_at.toISOString(),
+    confirmationProvenance: row.confirmation_provenance || {},
+    time: legacy.time || row.planned_eating_at.toISOString(),
+  };
+};
 
 function optionalProfileNumber(profile, field, label) {
   const value = profile[field];
@@ -154,24 +158,27 @@ export async function snapshot(db, user) {
     ? (await db.query(`${accountSelect} WHERE u.id = ANY($1::text[])`, [patientIds])).rows.map(accountFromRow)
     : [];
   const queryVisible = async (sql) => visiblePatientIds.length ? (await db.query(sql, [visiblePatientIds])).rows : [];
-  const glucose = (await queryVisible(`SELECT * FROM glucose_readings WHERE patient_id=ANY($1::text[]) ORDER BY measured_at DESC`)).map((row) => ({
-    ...(row.legacy_payload || {}), id: row.id, patientSlug: row.patient_id,
-    value: Number(row.glucose_mg_dl), recordedAt: row.measured_at.toISOString(),
-    time: row.legacy_payload?.time || row.measured_at.toISOString(),
-  }));
+  const glucose = (await queryVisible(`SELECT * FROM glucose_readings WHERE patient_id=ANY($1::text[]) ORDER BY measured_at DESC`)).map((row) => {
+    const legacy = legacyPayload(row);
+    return { ...legacy, id: row.id, patientSlug: row.patient_id,
+      value: Number(row.glucose_mg_dl), recordedAt: row.measured_at.toISOString(),
+      time: legacy.time || row.measured_at.toISOString() };
+  });
   const food = (await queryVisible(`SELECT * FROM meals WHERE patient_id=ANY($1::text[]) ORDER BY planned_eating_at DESC`)).map(mealJson);
-  const bolus = (await queryVisible(`SELECT * FROM insulin_doses WHERE patient_id=ANY($1::text[]) ORDER BY administered_at DESC`)).map((row) => ({
-    ...(row.legacy_payload || {}), id: row.id, patientSlug: row.patient_id,
-    administeredUnits: Number(row.administered_units), administeredAt: row.administered_at.toISOString(),
-  }));
+  const bolus = (await queryVisible(`SELECT * FROM insulin_doses WHERE patient_id=ANY($1::text[]) ORDER BY administered_at DESC`)).map((row) => {
+    const legacy = legacyPayload(row);
+    return { ...legacy, id: row.id, patientSlug: row.patient_id,
+      administeredUnits: Number(row.administered_units), administeredAt: row.administered_at.toISOString() };
+  });
   const messages = (await db.query(`SELECT m.*, c.patient_id, c.doctor_id, sender.role sender_role
     FROM messages m JOIN conversations c ON c.id=m.conversation_id JOIN users sender ON sender.id=m.sender_id
     WHERE c.status='active' AND ${user.role === 'patient' ? 'c.patient_id=$1' : 'c.doctor_id=$1'}
-    ORDER BY m.sent_at, m.id`, [user.id])).rows.map((row) => ({
-      ...(row.legacy_payload || {}), id: row.id, doctorId: row.doctor_id, patientSlug: row.patient_id,
-      from: row.sender_role, text: row.body, unread: !row.is_read,
-      sentAt: row.sent_at.toISOString(), time: row.legacy_payload?.time || row.sent_at.toISOString(),
-    }));
+    ORDER BY m.sent_at, m.id`, [user.id])).rows.map((row) => {
+      const legacy = legacyPayload(row);
+      return { ...legacy, id: row.id, doctorId: row.doctor_id, patientSlug: row.patient_id,
+        from: row.sender_role, text: row.body, unread: !row.is_read,
+        sentAt: row.sent_at.toISOString(), time: legacy.time || row.sent_at.toISOString() };
+    });
   return {
     account: accountFromRow(await accountById(db, user.id)), ...directory, patients,
     assignments: assignmentRows.map(assignmentJson), food, bolus, glucose, messages,
@@ -223,7 +230,7 @@ const sameInstant = (left, right) => left === null && right === null || left && 
 
 function sameOriginalMeal(row, expected) {
   try {
-    const item = row.legacy_payload || {};
+    const item = legacyPayload(row);
     const legacy = Object.hasOwn(item, 'carbs');
     const announced = legacy ? strictUnit(item.carbs, 'g', 'Announced carbohydrates') : optionalNumber(item.announcedCarbsG, 'Announced carbohydrates');
     const status = ['planned', 'eaten', 'cancelled'].includes(item.status) ? item.status : legacy ? 'planned' : item.status || 'planned';
@@ -276,7 +283,7 @@ export async function addPatientRecord(pool, kind, item, user) {
       created = await idempotentInsert(db, 'glucose_readings', item.id, user.id,
         { value, measuredAt, source: item.source || 'manual' }, () => db.query(`INSERT INTO glucose_readings
         (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,$5,$6)`,
-        [item.id, user.id, measuredAt, value, item.source || 'manual', JSON.stringify(item)]));
+        [item.id, user.id, measuredAt, value, item.source || 'manual', JSON.stringify(withoutLocalSyncMetadata(item))]));
     } else if (kind === 'bolus') {
       const units = strictUnit(item.administeredUnits ?? item.recorded, 'U', 'Administered insulin');
       const administeredAt = timestamp(item.administeredAt, 'Insulin administeredAt');
@@ -287,7 +294,7 @@ export async function addPatientRecord(pool, kind, item, user) {
         (id,patient_id,administered_units,administered_at,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [item.id, user.id, units, administeredAt,
         decisionSource, recommendationId,
-        JSON.stringify(item.confirmationProvenance || { source: 'patient_log' }), JSON.stringify(item)]));
+        JSON.stringify(item.confirmationProvenance || { source: 'patient_log' }), JSON.stringify(withoutLocalSyncMetadata(item))]));
     } else if (kind === 'food') {
       const legacy = Object.hasOwn(item, 'carbs');
       const announced = legacy ? strictUnit(item.carbs, 'g', 'Announced carbohydrates') : optionalNumber(item.announcedCarbsG, 'Announced carbohydrates');
@@ -315,7 +322,7 @@ export async function addPatientRecord(pool, kind, item, user) {
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [item.id, user.id, mealName,
         description, announced, plannedAt, status, actualAt, consumed,
         decisionSource, recommendationId,
-        JSON.stringify(status === 'eaten' ? { source: item.confirmAnnouncedAmount === true ? 'patient_confirmed_announced' : 'patient_entered_actual' } : {}), JSON.stringify(item)]));
+        JSON.stringify(status === 'eaten' ? { source: item.confirmAnnouncedAmount === true ? 'patient_confirmed_announced' : 'patient_entered_actual' } : {}), JSON.stringify(withoutLocalSyncMetadata(item))]));
     } else throw new ApiError(404, 'Unknown record type');
     if (created) await audit(db, user.id, `${kind}.created`, kind, item.id);
     return { ok: true };
@@ -411,7 +418,7 @@ export async function addMessage(pool, item, user) {
     }
     await db.query(`INSERT INTO messages(id,conversation_id,sender_id,body,sent_at,is_read,legacy_payload)
       VALUES($1,$2,$3,$4,$5,$6,$7)`, [item.id, conversation.id, user.id, item.text,
-      sentAt || new Date(), item.unread === false, JSON.stringify(item)]);
+      sentAt || new Date(), item.unread === false, JSON.stringify(withoutLocalSyncMetadata(item))]);
     await audit(db, user.id, 'message.created', 'message', item.id, { conversationId: conversation.id });
     return { ok: true };
   });

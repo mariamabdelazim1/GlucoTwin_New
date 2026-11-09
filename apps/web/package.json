@@ -6,6 +6,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "test": "node --experimental-strip-types --test src/utils/syncState.test.mjs",
+    "test:integration": "vitest run src/App.api.test.jsx --reporter=verbose",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -22,7 +23,11 @@
     "vite": "^7.1.12"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7"
+    "@types/react-dom": "^19.2.7",
+    "jsdom": "^31.0.0",
+    "pg": "^8.23.1",
+    "vitest": "^5.1.0"
   }
 }

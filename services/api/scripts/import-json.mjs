@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createPool, databaseUrl, withTransaction } from '../db.mjs';
-import { optionalNumber, strictUnit, timestamp } from '../lib.mjs';
+import { optionalNumber, strictUnit, timestamp, withoutLocalSyncMetadata } from '../lib.mjs';
 import { accountById, publicAccount, updateProfile } from '../store.mjs';
 
 const sourcePath = process.argv.find((value, index) => index > 1 && !value.startsWith('--'));
@@ -86,7 +86,10 @@ if (issues.length) {
         }
       }
       const insertLegacy = async (table, item, insert) => {
-        const existing = (await db.query(`SELECT patient_id,legacy_payload = $2::jsonb same_payload FROM ${table} WHERE id=$1`, [item.id, JSON.stringify(item)])).rows[0];
+        const compatibilityPayload = withoutLocalSyncMetadata(item);
+        const existing = (await db.query(`SELECT patient_id,
+          (legacy_payload - 'syncState' - 'syncAttempts' - 'syncNextAttemptAt' - 'syncError') = $2::jsonb same_payload
+          FROM ${table} WHERE id=$1`, [item.id, JSON.stringify(compatibilityPayload)])).rows[0];
         if (existing) {
           if (existing.patient_id !== item.patientSlug || !existing.same_payload) throw new Error(`${table}/${item.id} conflicts with existing database content`);
           return;
@@ -105,14 +108,14 @@ if (issues.length) {
           VALUES($1,$2,$3,$4,'active') ON CONFLICT(assignment_id) DO NOTHING`, [`legacy-conversation-${id}`, item.patientId, item.doctorId, id]);
       }
       for (const { item, when, value } of parsed.glucose) await insertLegacy('glucose_readings', item, () => db.query(`INSERT INTO glucose_readings
-        (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,'imported',$5)`, [item.id,item.patientSlug,when,value,JSON.stringify(item)]));
+        (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,'imported',$5)`, [item.id,item.patientSlug,when,value,JSON.stringify(withoutLocalSyncMetadata(item))]));
       for (const { item, plannedAt, actualAt, carbs, consumed, status, synthetic } of parsed.food) await insertLegacy('meals', item, () => db.query(`INSERT INTO meals
         (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,confirmation_provenance,legacy_payload)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'user_chosen',$10,$11)`, [item.id,item.patientSlug,item.meal,item.items,carbs,plannedAt,status,actualAt,consumed,
-        JSON.stringify(status === 'eaten' ? { source: synthetic ? 'documented_synthetic_fixture' : item.confirmAnnouncedAmount === true ? 'imported_patient_confirmation' : 'imported_explicit_actual' } : { source: 'ambiguous_legacy_import_requires_review' }),JSON.stringify(item)]));
+        JSON.stringify(status === 'eaten' ? { source: synthetic ? 'documented_synthetic_fixture' : item.confirmAnnouncedAmount === true ? 'imported_patient_confirmation' : 'imported_explicit_actual' } : { source: 'ambiguous_legacy_import_requires_review' }),JSON.stringify(withoutLocalSyncMetadata(item))]));
       for (const { item, when, amount } of parsed.bolus) await insertLegacy('insulin_doses', item, () => db.query(`INSERT INTO insulin_doses
         (id,patient_id,administered_units,administered_at,decision_source,confirmation_provenance,legacy_payload)
-        VALUES($1,$2,$3,$4,'user_decided',$5,$6)`, [item.id,item.patientSlug,amount,when,JSON.stringify({ source: 'legacy_import' }),JSON.stringify(item)]));
+        VALUES($1,$2,$3,$4,'user_decided',$5,$6)`, [item.id,item.patientSlug,amount,when,JSON.stringify({ source: 'legacy_import' }),JSON.stringify(withoutLocalSyncMetadata(item))]));
       for (const item of source.ratings) {
         const existing = (await db.query('SELECT doctor_id,patient_id,score,source FROM doctor_ratings WHERE id=$1', [item.id])).rows[0];
         const patientId = item.source==='patient'?item.patientId:null;
@@ -125,10 +128,13 @@ if (issues.length) {
         const assignment = (await db.query(`SELECT * FROM care_assignments WHERE patient_id=$1 AND doctor_id=$2 AND status='accepted' ORDER BY requested_at DESC LIMIT 1`, [item.patientSlug,item.doctorId])).rows[0];
         if (!assignment) throw new Error(`Message ${item.id} has no accepted assignment`);
         const conversation = (await db.query('SELECT id FROM conversations WHERE assignment_id=$1', [assignment.id])).rows[0];
-        const existing = (await db.query('SELECT conversation_id,legacy_payload = $2::jsonb same_payload FROM messages WHERE id=$1', [item.id, JSON.stringify(item)])).rows[0];
+        const compatibilityPayload = withoutLocalSyncMetadata(item);
+        const existing = (await db.query(`SELECT conversation_id,
+          (legacy_payload - 'syncState' - 'syncAttempts' - 'syncNextAttemptAt' - 'syncError') = $2::jsonb same_payload
+          FROM messages WHERE id=$1`, [item.id, JSON.stringify(compatibilityPayload)])).rows[0];
         if (existing && (existing.conversation_id !== conversation.id || !existing.same_payload)) throw new Error(`message/${item.id} conflicts with existing database content`);
         if (!existing) await db.query(`INSERT INTO messages(id,conversation_id,sender_id,body,sent_at,is_read,legacy_payload)
-          VALUES($1,$2,$3,$4,$5,$6,$7)`, [item.id,conversation.id,item.from==='patient'?item.patientSlug:item.doctorId,item.text,when,!item.unread,JSON.stringify(item)]);
+          VALUES($1,$2,$3,$4,$5,$6,$7)`, [item.id,conversation.id,item.from==='patient'?item.patientSlug:item.doctorId,item.text,when,!item.unread,JSON.stringify(compatibilityPayload)]);
       }
     });
     console.log(`Imported legacy data atomically from ${resolve(sourcePath)}`);

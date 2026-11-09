@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createPool, databaseUrl, withTransaction } from '../db.mjs';
-import { passwordHash } from '../lib.mjs';
+import { passwordHash, withoutLocalSyncMetadata } from '../lib.mjs';
 
 const useTest = process.argv.includes('--test');
 const pool = createPool({ connectionString: databaseUrl({ test: useTest }) });
@@ -38,18 +38,18 @@ try {
       VALUES($1,$2,NULL,$3,'demo') ON CONFLICT DO NOTHING`, [`demo-rating-${index}`, doctorId, score]);
     for (const item of demo.glucose) await db.query(`INSERT INTO glucose_readings
       (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,'demo',$5) ON CONFLICT DO NOTHING`,
-      [item.id, item.patientSlug, item.recordedAt, item.value, JSON.stringify(item)]);
+      [item.id, item.patientSlug, item.recordedAt, item.value, JSON.stringify(withoutLocalSyncMetadata(item))]);
     for (const item of demo.food) await db.query(`INSERT INTO meals
       (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,confirmation_provenance,legacy_payload)
       VALUES($1,$2,$3,$4,$5,$6,'eaten',$6,$5,'user_chosen',$7,$8) ON CONFLICT DO NOTHING`,
-      [item.id, item.patientSlug, item.meal, item.items, grams(item.carbs), at(item.time), JSON.stringify({ source: 'documented_synthetic_fixture' }), JSON.stringify(item)]);
+      [item.id, item.patientSlug, item.meal, item.items, grams(item.carbs), at(item.time), JSON.stringify({ source: 'documented_synthetic_fixture' }), JSON.stringify(withoutLocalSyncMetadata(item))]);
     for (const item of demo.bolus) await db.query(`INSERT INTO insulin_doses
       (id,patient_id,administered_units,administered_at,decision_source,confirmation_provenance,legacy_payload)
       VALUES($1,$2,$3,$4,'user_decided',$5,$6) ON CONFLICT DO NOTHING`,
-      [item.id, item.patientSlug, units(item.recorded), at(item.time), JSON.stringify({ synthetic: true }), JSON.stringify(item)]);
+      [item.id, item.patientSlug, units(item.recorded), at(item.time), JSON.stringify({ synthetic: true }), JSON.stringify(withoutLocalSyncMetadata(item))]);
     for (const item of demo.messages) await db.query(`INSERT INTO messages
       (id,conversation_id,sender_id,body,sent_at,is_read,legacy_payload) VALUES($1,'demo-conversation',$2,$3,$4,$5,$6)
-      ON CONFLICT DO NOTHING`, [item.id, item.from === 'patient' ? item.patientSlug : item.doctorId, item.text, at(item.time), !item.unread, JSON.stringify(item)]);
+      ON CONFLICT DO NOTHING`, [item.id, item.from === 'patient' ? item.patientSlug : item.doctorId, item.text, at(item.time), !item.unread, JSON.stringify(withoutLocalSyncMetadata(item))]);
   });
   console.log(`Seeded ${useTest ? 'test' : 'development'} demo data (idempotent)`);
 } finally {

@@ -1,5 +1,6 @@
 import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message } from '../types';
-export { mergeById } from './syncState';
+export { mergeById } from './syncState.ts';
+import { withoutLocalSyncMetadata } from './syncState.ts';
 
 export interface GlucoseEntry {
   id: string;
@@ -14,7 +15,8 @@ export interface GlucoseEntry {
 }
 
 export class SyncApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
 export interface SyncSnapshot {
@@ -61,7 +63,8 @@ export async function loginAccount(email: string, password: string, role: 'patie
 }
 
 export const getSnapshot = () => api<SyncSnapshot>('snapshot');
-export const syncItem = (kind: 'food' | 'bolus' | 'glucose' | 'messages', item: unknown) => api<{ ok: boolean }>(kind, 'POST', item);
+export const syncItem = (kind: 'food' | 'bolus' | 'glucose' | 'messages', item: unknown) =>
+  api<{ ok: boolean }>(kind, 'POST', withoutLocalSyncMetadata(item));
 export const updateMeal = (id: string, update: unknown) => api<{ ok: boolean; meal: FoodEntry }>(`food/${encodeURIComponent(id)}`, 'PATCH', update);
 export const syncAssignment = (patientId: string, status: 'accepted' | 'declined') => api('assignment', 'POST', { patientId, status });
 export const syncRating = (doctorId: string, score: number) => api<{ ratings: DoctorRating[] }>('rating', 'POST', { doctorId, score });

@@ -12,6 +12,7 @@
     "db:seed": "npm --workspace services/api run db:seed",
     "db:import": "npm --workspace services/api run db:import --",
     "build:web": "npm --workspace apps/web run build",
-    "test:api": "npm --workspace services/api test"
+    "test:api": "npm --workspace services/api test",
+    "test:web:integration": "npm --workspace services/api run db:migrate:test && npm --workspace services/api run db:seed:test && npm --workspace apps/web run test:integration"
   }
 }

@@ -1,8 +1,20 @@
 export type SyncState = 'pending' | 'synced' | 'conflict' | 'failed';
 
+export const localSyncFields = ['syncState', 'syncAttempts', 'syncNextAttemptAt', 'syncError'] as const;
+
+export function withoutLocalSyncMetadata<T>(value: T): T {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const copy = { ...(value as Record<string, unknown>) };
+  for (const field of localSyncFields) delete copy[field];
+  return copy as T;
+}
+
 export function mergeById<T extends { id: string; version?: number; syncState?: SyncState }>(local: T[], remote: T[]) {
   if (!remote.length) return local;
-  const remoteById = new Map(remote.map((item) => [item.id, item]));
+  const remoteById = new Map(remote.map((item) => {
+    const confirmed = withoutLocalSyncMetadata(item);
+    return [confirmed.id, confirmed];
+  }));
   let changed = false;
   const merged = local.map((item) => {
     const next = remoteById.get(item.id);
