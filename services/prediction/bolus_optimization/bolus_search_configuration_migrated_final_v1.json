@@ -1,0 +1,8 @@
+{
+  "configuration_version": "step13-expanded_grid_v1",
+  "maximum_bolus_u": 3.0,
+  "bolus_increment_u": 0.5,
+  "maximum_candidate_count": 16,
+  "candidate_batch_size": 4,
+  "intended_use": "Migrated unchanged research grid for renewed final-model validation; not a safe-dose limit."
+}

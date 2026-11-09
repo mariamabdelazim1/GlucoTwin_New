@@ -1,0 +1,10 @@
+{
+  "name": "@glucotwin/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch index.mjs",
+    "start": "node index.mjs",
+    "test": "node --test sync.test.mjs"
+  }
+}

@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #172033;
+  background: #f6f8fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.focus-ring {
+  @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-clinical-primary;
+}
+
+.surface {
+  @apply rounded-lg border border-clinical-border bg-white shadow-clinical;
+}
+
+.table-scroll {
+  scrollbar-width: thin;
+}
+
+.landing-wave {
+  position: relative;
+  background:
+    linear-gradient(90deg, transparent 0 9%, #e4e7ec 9% 10%, transparent 10% 19%, #e4e7ec 19% 20%, transparent 20% 29%, #e4e7ec 29% 30%, transparent 30% 39%, #e4e7ec 39% 40%, transparent 40% 49%, #e4e7ec 49% 50%, transparent 50% 59%, #e4e7ec 59% 60%, transparent 60% 69%, #e4e7ec 69% 70%, transparent 70% 79%, #e4e7ec 79% 80%, transparent 80% 89%, #e4e7ec 89% 90%, transparent 90%),
+    linear-gradient(180deg, transparent 0 31%, #e4e7ec 31% 32%, transparent 32% 64%, #e4e7ec 64% 65%, transparent 65%);
+}
+
+.landing-wave::before,
+.landing-wave::after {
+  content: '';
+  position: absolute;
+  inset: 10px 0 20px;
+  background-repeat: repeat-x;
+  background-size: 180px 100%;
+  animation: clinicalWave 7s linear infinite;
+}
+
+.landing-wave::before {
+  background-image: radial-gradient(circle at 0 62%, #047857 0 3px, transparent 4px), linear-gradient(110deg, transparent 0 12%, #047857 12% 14%, transparent 14% 26%, #047857 26% 28%, transparent 28% 41%, #047857 41% 43%, transparent 43% 56%, #047857 56% 58%, transparent 58% 72%, #047857 72% 74%, transparent 74%);
+  opacity: 0.95;
+}
+
+.landing-wave::after {
+  background-image: linear-gradient(105deg, transparent 0 20%, rgba(4, 120, 87, 0.35) 20% 22%, transparent 22% 46%, rgba(4, 120, 87, 0.35) 46% 48%, transparent 48% 70%, rgba(4, 120, 87, 0.35) 70% 72%, transparent 72%);
+  animation-duration: 11s;
+  opacity: 0.7;
+}
+
+@keyframes clinicalWave {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-180px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wave::before,
+  .landing-wave::after {
+    animation: none;
+  }
+}

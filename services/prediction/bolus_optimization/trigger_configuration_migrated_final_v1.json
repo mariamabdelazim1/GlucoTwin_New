@@ -1,0 +1,7 @@
+{
+  "configuration_version": "step13-expanded_grid_v1",
+  "high_glucose_threshold_mg_dl": 180.0,
+  "high_glucose_persistence_minutes": 15,
+  "high_glucose_reassessment_minutes": 120,
+  "intended_use": "Migrated unchanged for renewed experimental validation with the final model."
+}

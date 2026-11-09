@@ -1,0 +1,14 @@
+{
+  "name": "glucotwin-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "services/api"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "npm --workspace services/api run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "test:api": "npm --workspace services/api test"
+  }
+}

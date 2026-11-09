@@ -1,0 +1,45 @@
+# Operating-system and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Web and Node
+node_modules/
+.npm-cache/
+dist/
+coverage/
+npm-debug.log*
+*.tsbuildinfo
+services/api/data.json
+services/api/.secret
+
+# Flutter and Dart
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/.pub-cache/
+apps/mobile/build/
+apps/mobile/android/local.properties
+apps/mobile/ios/Flutter/.last_build_id
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Model research data and generated outputs
+*.parquet
+services/prediction/results/
+services/prediction/logs/

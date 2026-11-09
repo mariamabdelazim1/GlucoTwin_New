@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diabetes Digital Twin | Phone Preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #edf3f0; color: #12392c; }
+    header { padding: 28px 36px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
+    header a { color: #047857; font-size: 14px; font-weight: 600; text-decoration: none; }
+    main { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; max-width: 1180px; margin: 12px auto 0; padding: 0 28px 36px; }
+    figure { margin: 0; min-width: 0; }
+    figcaption { text-align: center; padding: 18px 0; font-size: 14px; font-weight: 600; }
+    .phone { position: relative; padding: 8px; background: #151b19; border: 2px solid #48514d; border-radius: 38px; box-shadow: 0 16px 30px #12392c22, inset 0 0 0 2px #080b09; aspect-ratio: 406 / 880; }
+    .phone::before { content: ''; position: absolute; left: -5px; top: 110px; width: 3px; height: 55px; border-radius: 2px; background: #38433d; }
+    .phone::after { content: ''; position: absolute; right: -5px; top: 155px; width: 3px; height: 65px; border-radius: 2px; background: #38433d; }
+    .screen { position: relative; height: 100%; border-radius: 29px; overflow: hidden; background: #f4f8f5; }
+    .status { height: 26px; background: #f4f8f5; display: flex; align-items: center; justify-content: space-between; padding: 0 17px; color: #173c2e; font-size: 10px; font-weight: 700; }
+    .notch { position: absolute; z-index: 3; left: 50%; top: 0; transform: translateX(-50%); width: 38%; height: 19px; background: #151b19; border-radius: 0 0 13px 13px; }
+    .viewport { position: absolute; top: 26px; bottom: 13px; left: 0; right: 0; overflow: hidden; }
+    iframe { width: 390px; height: 844px; border: 0; transform-origin: top left; background: #f4f8f5; }
+    .home { position: absolute; bottom: 4px; left: 33%; width: 34%; height: 4px; background: #173c2e; border-radius: 5px; }
+    @media (max-width: 980px) { main { grid-template-columns: repeat(2, minmax(0,1fr)); max-width: 720px; } }
+    @media (max-width: 500px) { header { padding: 20px; flex-wrap: wrap; } main { grid-template-columns: 1fr; max-width: 360px; padding: 0 20px 28px; } }
+  </style>
+</head>
+<body>
+  <header><h1>Diabetes Digital Twin</h1><a href="http://127.0.0.1:5176/" target="_blank" rel="noreferrer">Open app</a></header>
+  <main>
+    <figure><div class="phone"><div class="screen"><div class="status"><span>9:41</span><span>5G ▰</span></div><div class="notch"></div><div class="viewport"><iframe title="Patient welcome screen" src="http://127.0.0.1:5176/?view=welcome"></iframe></div><div class="home"></div></div></div><figcaption>Welcome</figcaption></figure>
+    <figure><div class="phone"><div class="screen"><div class="status"><span>9:41</span><span>5G ▰</span></div><div class="notch"></div><div class="viewport"><iframe title="Patient dashboard" src="http://127.0.0.1:5176/?view=overview"></iframe></div><div class="home"></div></div></div><figcaption>Dashboard</figcaption></figure>
+    <figure><div class="phone"><div class="screen"><div class="status"><span>9:41</span><span>5G ▰</span></div><div class="notch"></div><div class="viewport"><iframe title="Patient readings food and bolus" src="http://127.0.0.1:5176/?view=record"></iframe></div><div class="home"></div></div></div><figcaption>Readings &amp; Logs</figcaption></figure>
+    <figure><div class="phone"><div class="screen"><div class="status"><span>9:41</span><span>5G ▰</span></div><div class="notch"></div><div class="viewport"><iframe title="Patient doctor conversation" src="http://127.0.0.1:5176/?view=care"></iframe></div><div class="home"></div></div></div><figcaption>Care Team</figcaption></figure>
+  </main>
+  <script>
+    const resize = () => document.querySelectorAll('.viewport').forEach(view => {
+      const frame = view.querySelector('iframe');
+      const scale = view.clientWidth / 390;
+      frame.style.height = `${view.clientHeight / scale}px`;
+      frame.style.transform = `scale(${scale})`;
+    });
+    new ResizeObserver(resize).observe(document.querySelector('main'));
+    resize();
+  </script>
+</body>
+</html>

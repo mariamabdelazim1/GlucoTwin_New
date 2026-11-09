@@ -1,0 +1,8 @@
+{
+  "configuration_version": "bolus-search-v1",
+  "maximum_bolus_u": 2.0,
+  "bolus_increment_u": 0.5,
+  "maximum_candidate_count": 16,
+  "candidate_batch_size": 4,
+  "intended_use": "Experimental diagnostic-only search grid; these bounds are not patient-specific safe limits."
+}

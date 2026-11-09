@@ -1,0 +1,18 @@
+{
+  "configuration_version": "scoring-v1",
+  "target_lower_mg_dl": 70.0,
+  "target_upper_mg_dl": 180.0,
+  "severe_low_threshold_mg_dl": 54.0,
+  "hard_minimum_mg_dl": 54.0,
+  "low_weight": 4.0,
+  "high_weight": 1.0,
+  "severe_low_weight": 10.0,
+  "insulin_weight": 0.05,
+  "terminal_weight": 1.0,
+  "glucose_scale_mg_dl": 50.0,
+  "insulin_scale_u": 2.0,
+  "terminal_window_minutes": 30,
+  "absolute_tie_tolerance": 1e-9,
+  "relative_tie_tolerance": 1e-9,
+  "intended_use": "Migrated unchanged simulation-only score for renewed final-model validation."
+}

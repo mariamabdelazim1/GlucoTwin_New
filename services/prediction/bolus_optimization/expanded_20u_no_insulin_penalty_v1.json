@@ -1,0 +1,11 @@
+{
+  "configuration_version": "expanded_20u_no_insulin_penalty_v1",
+  "source_configuration_id": "D_both_changes",
+  "source_effective_configuration": "results/bolus_optimization/ceiling_insulin_penalty_ablation_v1/effective_configurations.json",
+  "maximum_bolus_u": 20.0,
+  "bolus_increment_u": 0.5,
+  "maximum_candidate_count": 41,
+  "candidate_batch_size": 4,
+  "insulin_weight": 0.0,
+  "intended_use": "Post-test exploratory Hovorka-simulated validation search. The 20 U ceiling is an experimental search bound, not a clinically validated safe-dose limit."
+}

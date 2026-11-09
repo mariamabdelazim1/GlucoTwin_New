@@ -1,0 +1,41 @@
+{
+  "patientId": "omar-hassan",
+  "summary": { "currentGlucose": 142, "trend": "Falling", "timeInRange": 79, "averageGlucose": 154, "lastReading": "Sample day, 23:00" },
+  "cgm": [
+    { "time": "00:00", "glucose": 128 }, { "time": "01:00", "glucose": 122 }, { "time": "02:00", "glucose": 116 }, { "time": "03:00", "glucose": 111 },
+    { "time": "04:00", "glucose": 108 }, { "time": "05:00", "glucose": 118 }, { "time": "06:00", "glucose": 135 }, { "time": "07:00", "glucose": 156 },
+    { "time": "08:00", "glucose": 178 }, { "time": "09:00", "glucose": 166 }, { "time": "10:00", "glucose": 148 }, { "time": "11:00", "glucose": 136 },
+    { "time": "12:00", "glucose": 161 }, { "time": "13:00", "glucose": 194 }, { "time": "14:00", "glucose": 207 }, { "time": "15:00", "glucose": 184 },
+    { "time": "16:00", "glucose": 162 }, { "time": "17:00", "glucose": 150 }, { "time": "18:00", "glucose": 172 }, { "time": "19:00", "glucose": 203 },
+    { "time": "20:00", "glucose": 189 }, { "time": "21:00", "glucose": 164 }, { "time": "22:00", "glucose": 149 }, { "time": "23:00", "glucose": 142 }
+  ],
+  "forecast": [
+    { "time": "12:00", "historical": 161 }, { "time": "13:00", "historical": 194 }, { "time": "14:00", "historical": 207 }, { "time": "15:00", "historical": 184 },
+    { "time": "16:00", "historical": 162 }, { "time": "17:00", "historical": 150 }, { "time": "18:00", "historical": 172 }, { "time": "19:00", "historical": 203 },
+    { "time": "20:00", "predicted": 191 }, { "time": "21:00", "predicted": 174 }, { "time": "22:00", "predicted": 158 }, { "time": "23:00", "predicted": 146 }
+  ],
+  "forecastSnapshots": [
+    { "horizon": "30 min", "glucose": 188, "trend": "Rising", "note": "Post-meal elevation expected" },
+    { "horizon": "60 min", "glucose": 176, "trend": "Falling", "note": "Returning toward target range" },
+    { "horizon": "120 min", "glucose": 154, "trend": "Stable", "note": "Projected near personal target" }
+  ],
+  "glucose": [
+    { "id": "demo-glucose-breakfast", "patientSlug": "omar-hassan", "value": 136, "time": "08:00", "recordedAt": "2026-01-01T08:00:00Z" },
+    { "id": "demo-glucose-lunch", "patientSlug": "omar-hassan", "value": 184, "time": "13:10", "recordedAt": "2026-01-01T13:10:00Z" }
+  ],
+  "messages": [
+    { "id": "demo-message-patient", "doctorId": "DR-001", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "avatar": "OH", "from": "patient", "text": "Demo check-in: I logged lunch. Can you see my records?", "time": "13:15", "unread": false },
+    { "id": "demo-message-doctor", "doctorId": "DR-001", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "avatar": "OH", "from": "doctor", "text": "Yes, your demo lunch and CGM chart are visible.", "time": "13:20", "unread": false }
+  ],
+  "food": [
+    { "id": "f1", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "08:05", "meal": "Breakfast", "items": "Greek yogurt, oats, berries", "carbs": "54g", "impact": "+32 mg/dL", "status": "Reviewed" },
+    { "id": "f2", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "13:12", "meal": "Lunch", "items": "Chicken rice bowl, apple", "carbs": "62g", "impact": "+48 mg/dL", "status": "Needs review" },
+    { "id": "f3", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "16:20", "meal": "Snack", "items": "Protein bar", "carbs": "18g", "impact": "+12 mg/dL", "status": "Reviewed" },
+    { "id": "f4", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "19:30", "meal": "Dinner", "items": "Grilled fish, potatoes, salad", "carbs": "71g", "impact": "+39 mg/dL", "status": "Recorded" }
+  ],
+  "bolus": [
+    { "id": "b1", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "08:05", "meal": "Breakfast", "carbs": "54g", "preMeal": "136 mg/dL", "recommended": "5.5 U", "recorded": "6 U" },
+    { "id": "b2", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "13:12", "meal": "Lunch", "carbs": "62g", "preMeal": "184 mg/dL", "recommended": "5.5 U", "recorded": "5 U" },
+    { "id": "b3", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "19:30", "meal": "Dinner", "carbs": "71g", "preMeal": "169 mg/dL", "recommended": "7 U", "recorded": "7 U" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "configuration_version": "consumption-profile-v1",
+  "profile_name": "uniform_15_minute_assumption",
+  "interval_fractions": [0.3333333333333333, 0.3333333333333333, 0.3333333333333333],
+  "sum_tolerance": 1e-09,
+  "intended_use": "Experimental assumption: spread each known outstanding meal uniformly over three five-minute forecast intervals; this is not observed future consumption."
+}

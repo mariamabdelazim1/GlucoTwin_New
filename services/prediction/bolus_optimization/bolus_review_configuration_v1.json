@@ -1,0 +1,6 @@
+{
+  "configuration_version": "bolus-dose-review-v1",
+  "elevated_bolus_threshold_u": 10.0,
+  "high_bolus_threshold_u": 20.0,
+  "intended_use": "Experimental research software review triggers only; these thresholds are not clinically validated safe-dose limits."
+}

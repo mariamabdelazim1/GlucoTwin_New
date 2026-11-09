@@ -1,0 +1,58 @@
+import '../models/notification_model.dart';
+
+final mockNotifications = [
+  AppNotification(
+    id: 'n1',
+    type: NotificationType.aiRecommendation,
+    title: 'AI Recommendation',
+    body: 'Based on your current glucose trend, consider a 15g carb snack before your 6 PM walk.',
+    timestamp: DateTime.now().subtract(const Duration(minutes: 8)),
+    isRead: false,
+    actionLabel: 'View Details',
+  ),
+  AppNotification(
+    id: 'n2',
+    type: NotificationType.info,
+    title: 'Digital Twin Updated',
+    body: 'Your physiological model has been re-calibrated with today\'s data. Prediction accuracy improved by 3%.',
+    timestamp: DateTime.now().subtract(const Duration(minutes: 32)),
+    isRead: false,
+    actionLabel: 'View Twin',
+  ),
+  AppNotification(
+    id: 'n3',
+    type: NotificationType.safetyWarning,
+    title: 'Post-Meal Spike Predicted',
+    body: 'Your digital twin predicts glucose may reach 195 mg/dL in 45 minutes. Pre-bolus recommended.',
+    timestamp: DateTime.now().subtract(const Duration(hours: 1, minutes: 15)),
+    isRead: true,
+    actionLabel: 'Bolus Now',
+  ),
+  AppNotification(
+    id: 'n4',
+    type: NotificationType.reminder,
+    title: 'Basal Rate Review',
+    body: 'Your AI-optimized basal schedule is ready for review. 3 hours updated overnight.',
+    timestamp: DateTime.now().subtract(const Duration(hours: 3)),
+    isRead: true,
+    actionLabel: 'Review',
+  ),
+  AppNotification(
+    id: 'n5',
+    type: NotificationType.hypo,
+    title: 'Low Glucose Alert',
+    body: 'Glucose dropped to 64 mg/dL at 2:18 AM. 15g fast carbs were recommended.',
+    timestamp: DateTime.now().subtract(const Duration(hours: 8)),
+    isRead: true,
+    actionLabel: null,
+  ),
+  AppNotification(
+    id: 'n6',
+    type: NotificationType.info,
+    title: 'Adaptation Progress',
+    body: 'Day 8 of 14 complete. Your digital twin is now 62% personalized. Keep wearing your CGM.',
+    timestamp: DateTime.now().subtract(const Duration(hours: 12)),
+    isRead: true,
+    actionLabel: 'View Progress',
+  ),
+];
