@@ -64,6 +64,7 @@ export function PatientDashboard({
         text,
         time: 'Now',
         unread: true,
+        sentAt: new Date().toISOString(), syncState: 'pending', syncAttempts: 0,
       },
     ]);
     setBotReply(`Your message was recorded for ${doctorName}.`);
@@ -91,6 +92,7 @@ export function PatientDashboard({
         announcedCarbsG: Number(mealForm.carbs),
         consumedCarbsG: mealForm.status === 'eaten' ? Number(mealForm.carbs) : null,
         ...(mealForm.status === 'eaten' ? { confirmAnnouncedAmount: true } : {}),
+        syncState: 'pending', syncAttempts: 0,
       },
       ...current,
     ]);
@@ -111,6 +113,7 @@ export function PatientDashboard({
         recommended: 'Doctor review',
         recorded: `${bolusForm.recorded.trim()} U`,
         administeredAt: new Date().toISOString(),
+        syncState: 'pending', syncAttempts: 0,
       },
       ...current,
     ]);
@@ -132,7 +135,7 @@ export function PatientDashboard({
     const value = Number(glucoseValue);
     if (!Number.isFinite(value) || value < 20 || value > 600) return;
     const now = new Date();
-    setGlucoseEntries((current) => [{ id: crypto.randomUUID(), patientSlug: patient.slug, value, time: currentTime(), recordedAt: now.toISOString() }, ...current]);
+    setGlucoseEntries((current) => [{ id: crypto.randomUUID(), patientSlug: patient.slug, value, time: currentTime(), recordedAt: now.toISOString(), syncState: 'pending', syncAttempts: 0 }, ...current]);
     setGlucoseValue('');
   };
 

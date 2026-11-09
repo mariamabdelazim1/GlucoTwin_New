@@ -140,9 +140,16 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal((await request('rating', { token: first, method: 'POST', data: { doctorId: 'DR-001', score: 5 } })).status, 200);
     assert.equal((await request('rating', { token: doctorOne, method: 'POST', data: { doctorId: 'DR-001', score: 5 } })).status, 403);
 
-    const reading = { id: `reading-${runId}`, patientSlug: firstId, value: 120, recordedAt: new Date().toISOString() };
+    const reading = { id: `reading-${runId}`, patientSlug: firstId, value: 120, recordedAt: '2026-01-01T13:10:00Z' };
     assert.equal((await request('glucose', { token: first, method: 'POST', data: reading })).status, 200);
-    assert.equal((await request('glucose', { token: first, method: 'POST', data: reading })).status, 200);
+    assert.equal((await request('glucose', { token: first, method: 'POST', data: { ...reading, recordedAt: '2026-01-01T13:10:00.000Z', time: 'display only' } })).status, 200);
+    const concurrentId = `reading-concurrent-${runId}`;
+    const concurrent = { ...reading, id: concurrentId };
+    assert.deepEqual((await Promise.all([
+      request('glucose', { token: first, method: 'POST', data: concurrent }),
+      request('glucose', { token: first, method: 'POST', data: { ...concurrent, recordedAt: '2026-01-01T13:10:00.000Z' } }),
+    ])).map((result) => result.status), [200, 200]);
+    assert.equal(Number((await db.query('SELECT count(*) FROM glucose_readings WHERE id=$1', [concurrentId])).rows[0].count), 1);
     assert.equal((await request('glucose', { token: first, method: 'POST', data: { ...reading, value: 121 } })).status, 409);
     assert.equal((await request('glucose', { token: second, method: 'POST', data: { ...reading, patientSlug: firstId } })).status, 403);
 
@@ -152,9 +159,12 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: plannedMealId, patientSlug: firstId, announcedCarbsG: 30, status: 'planned', plannedEatingAt: new Date().toISOString(),
     } })).status, 200);
-    const legacyTime = new Date().toISOString();
+    const legacyTime = '2026-01-02T10:00:00.000Z';
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: legacyPlannedMealId, patientSlug: firstId, carbs: '45g', status: 'planned', plannedEatingAt: legacyTime,
+    } })).status, 200);
+    assert.equal((await request('food', { token: first, method: 'POST', data: {
+      id: legacyPlannedMealId, patientSlug: firstId, carbs: '45g', status: 'planned', plannedEatingAt: legacyTime.replace('.000Z', 'Z'), time: 'display only',
     } })).status, 200);
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: zeroMealId, patientSlug: firstId, announcedCarbsG: 0, consumedCarbsG: 0, status: 'eaten',
@@ -188,6 +198,12 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     } });
     assert.equal(cancelled.status, 200);
     assert.equal(cancelled.body.meal.consumedCarbsG, null);
+    assert.equal((await request('food', { token: first, method: 'POST', data: {
+      id: legacyPlannedMealId, patientSlug: firstId, carbs: '45g', status: 'planned', plannedEatingAt: legacyTime,
+    } })).status, 200);
+    assert.equal((await request('food', { token: first, method: 'POST', data: {
+      id: legacyPlannedMealId, patientSlug: firstId, carbs: '46g', status: 'planned', plannedEatingAt: legacyTime,
+    } })).status, 409);
     const snapMeal = (await request('snapshot', { token: first })).body.food.find((item) => item.id === plannedMealId);
     assert.equal(snapMeal.status, 'eaten');
     assert.equal(snapMeal.version, 2);
@@ -211,6 +227,9 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal((await request('bolus', { token: first, method: 'POST', data: {
       id: `bolus-${runId}`, patientSlug: firstId, recorded: '2 U', administeredAt: legacyTime,
     } })).status, 200);
+    assert.equal((await request('bolus', { token: first, method: 'POST', data: {
+      id: `bolus-${runId}`, patientSlug: firstId, administeredUnits: 2, administeredAt: legacyTime.replace('.000Z', 'Z'), time: 'display only',
+    } })).status, 200);
     assert.equal((await db.query('SELECT administered_at FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].administered_at.toISOString(), legacyTime);
 
     const contactOne = await request('emergency-contacts', { token: first, method: 'POST', data: { contactName: 'One', relationship: 'Parent', phoneNumber: '+201111111111', isPrimary: true } });
@@ -221,9 +240,19 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(contacts.length, 2);
     assert.equal(contacts.filter((contact) => contact.isPrimary).length, 1);
     assert.equal(contacts.find((contact) => contact.isPrimary).contactName, 'Two');
+    assert.equal((await request(`emergency-contacts/${contactOne.body.contact.id}`, { token: first, method: 'PUT', data: { contactName: 'One Updated', phoneNumber: '+201111111112', isPrimary: true } })).status, 200);
+    const changedContacts = (await request('emergency-contacts', { token: first })).body.contacts;
+    assert.equal(changedContacts.filter((contact) => contact.isPrimary).length, 1);
+    assert.equal(changedContacts.find((contact) => contact.isPrimary).contactName, 'One Updated');
+    assert.equal((await request('emergency-contacts', { token: first, method: 'POST', data: { contactName: 'Bad', relationship: 'Friend', phoneNumber: '01001234567' } })).status, 400);
+    assert.equal((await request(`emergency-contacts/${contactOne.body.contact.id}`, { token: second, method: 'PUT', data: { relationship: 'Other' } })).status, 404);
+    assert.equal((await request(`emergency-contacts/${contactOne.body.contact.id}`, { token: second, method: 'DELETE' })).status, 404);
+    assert.equal((await request(`emergency-contacts/${contactTwo.body.contact.id}`, { token: first, method: 'DELETE' })).status, 200);
+    assert.equal((await request('emergency-contacts', { token: first })).body.contacts.length, 1);
 
-    const messageOne = { id: `message-old-${runId}`, patientSlug: firstId, from: 'patient', text: 'Old doctor conversation' };
+    const messageOne = { id: `message-old-${runId}`, patientSlug: firstId, from: 'patient', text: 'Old doctor conversation', sentAt: '2026-01-01T13:10:00Z' };
     assert.equal((await request('messages', { token: first, method: 'POST', data: messageOne })).status, 200);
+    assert.equal((await request('messages', { token: first, method: 'POST', data: { ...messageOne, sentAt: '2026-01-01T13:10:00.000Z', time: 'Now' } })).status, 200);
     assert.equal((await request('patient/doctor-request', { token: first, method: 'POST', data: { doctorId: 'DR-002' } })).status, 200);
     assert.equal((await request('snapshot', { token: doctorOne })).body.messages.some((item) => item.id === messageOne.id), false);
     assert.equal((await request('snapshot', { token: doctorTwo })).body.messages.some((item) => item.id === messageOne.id), false);

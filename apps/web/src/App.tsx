@@ -25,8 +25,9 @@ import { patients } from './data/patients';
 import { initialMessages } from './data/messages';
 import { bolusHistory, foodLog } from './data/cgm';
 import { useStoredState } from './utils/storage';
-import { bridgeAccount, getSnapshot, loginAccount, mergeById, syncAssignment, syncItem, syncRating } from './utils/sync';
+import { bridgeAccount, getSnapshot, loginAccount, mergeById, SyncApiError, syncAssignment, syncItem, syncRating } from './utils/sync';
 import type { GlucoseEntry } from './utils/sync';
+import { retryDecision } from './utils/syncState';
 
 type Session = { id: string; role: Role };
 
@@ -116,7 +117,7 @@ export default function App() {
   const [bolusEntries, setBolusEntries] = useStoredState('ddt.bolus.v1', bolusHistory);
   const [glucoseEntries, setGlucoseEntries] = useStoredState<GlucoseEntry[]>('ddt.glucose.v1', []);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const sent = useRef({ food: new Set<string>(), bolus: new Set<string>(), glucose: new Set<string>(), messages: new Set<string>() });
+  const inFlight = useRef(new Set<string>());
   const [session, setSession] = useState<Session | null>(() => {
     try { return JSON.parse(sessionStorage.getItem('ddt.session.v1') || 'null') as Session | null; } catch { return null; }
   });
@@ -125,7 +126,10 @@ export default function App() {
   useEffect(() => {
     if (!session || session.role === 'admin' || !sessionStorage.getItem('ddt.sync.token')) return;
     let active = true;
+    let polling = false;
     const refresh = async () => {
+      if (polling) return;
+      polling = true;
       try {
         const snapshot = await getSnapshot();
         if (!active) return;
@@ -156,6 +160,7 @@ export default function App() {
         setRatings(snapshot.ratings);
         setSyncError(null);
       } catch (error) { console.error('Patient sync failed', error); setSyncError('Connection to the care sync service is unavailable. New entries may not yet be visible to your doctor or mobile app.'); }
+      finally { polling = false; }
     };
     void refresh();
     const timer = window.setInterval(refresh, 4000);
@@ -163,21 +168,39 @@ export default function App() {
   }, [session, setAccounts, setAssignments, setFoodEntries, setBolusEntries, setGlucoseEntries, setMessages, setRatings]);
   useEffect(() => {
     if (!session || session.role === 'admin' || !sessionStorage.getItem('ddt.sync.token')) return;
-    const upload = <T extends { id: string; patientSlug: string }>(kind: 'food' | 'bolus' | 'glucose' | 'messages', entries: T[]) => {
+    type Uploadable = { id: string; patientSlug: string; syncState?: string; syncAttempts?: number; syncNextAttemptAt?: number };
+    const mark = (kind: 'food' | 'bolus' | 'glucose' | 'messages', id: string, patch: Record<string, unknown>) => {
+      if (kind === 'food') setFoodEntries((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+      if (kind === 'bolus') setBolusEntries((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+      if (kind === 'glucose') setGlucoseEntries((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+      if (kind === 'messages') setMessages((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+    };
+    const upload = <T extends Uploadable>(kind: 'food' | 'bolus' | 'glucose' | 'messages', entries: T[]) => {
       for (const item of entries) {
-        if (sent.current[kind].has(item.id)) continue;
-        if (kind === 'food' && 'version' in item && typeof item.version === 'number') { sent.current.food.add(item.id); continue; }
-        if (['f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3', 'm1', 'm2', 'm3', 'm4', 'm5'].includes(item.id)) continue;
+        if (item.syncState !== 'pending' || (item.syncNextAttemptAt ?? 0) > Date.now()) continue;
+        const operation = `${kind}:${item.id}`;
+        if (inFlight.current.has(operation)) continue;
         if (session.role === 'patient' && item.patientSlug !== session.id) continue;
         if (kind === 'messages' && (!('from' in item) || item.from !== session.role)) continue;
         if (kind === 'messages' && 'doctorId' in item && item.doctorId && item.doctorId !== (session.role === 'doctor' ? session.id : account?.patientProfile?.selectedDoctorId)) continue;
         if (session.role === 'doctor' && kind !== 'messages') continue;
-        sent.current[kind].add(item.id);
-        void syncItem(kind, item).catch((error) => {
-          sent.current[kind].delete(item.id);
-          setSyncError('An entry is waiting to sync. It may not yet be visible to your doctor or mobile app.');
-          console.error('Patient sync upload failed', error);
-        });
+        inFlight.current.add(operation);
+        void syncItem(kind, item).then(() => {
+          mark(kind, item.id, { syncState: 'synced', syncAttempts: 0, syncNextAttemptAt: undefined, syncError: undefined });
+          setSyncError(null);
+        }).catch((error) => {
+          const decision = retryDecision(error instanceof SyncApiError ? error.status : undefined, item.syncAttempts ?? 0);
+          if (decision.state === 'conflict') {
+            mark(kind, item.id, { syncState: 'conflict', syncAttempts: decision.attempts, syncError: error.message });
+            setSyncError('A local entry conflicts with a server record. It was not retried; review the entry before resolving it.');
+          } else if (decision.state === 'failed') {
+            mark(kind, item.id, { syncState: 'failed', syncAttempts: decision.attempts, syncError: error instanceof Error ? error.message : 'Upload failed' });
+            setSyncError('An entry could not be synchronized and will not retry automatically. It remains saved on this device.');
+          } else {
+            mark(kind, item.id, { syncAttempts: decision.attempts, syncNextAttemptAt: decision.nextAttemptAt, syncError: error instanceof Error ? error.message : 'Upload failed' });
+            setSyncError('An entry is waiting to sync. It remains saved on this device and will retry automatically.');
+          }
+        }).finally(() => inFlight.current.delete(operation));
       }
     };
     const uploadAll = () => {
@@ -187,7 +210,7 @@ export default function App() {
       upload('messages', messages);
     };
     uploadAll();
-    const timer = window.setInterval(uploadAll, 4000);
+    const timer = window.setInterval(uploadAll, 1000);
     return () => window.clearInterval(timer);
   }, [session, account?.patientProfile?.selectedDoctorId, foodEntries, bolusEntries, glucoseEntries, messages]);
   useEffect(() => {
@@ -235,6 +258,10 @@ export default function App() {
   const visibleMessages = messages.filter((message) => !['m1', 'm2'].includes(message.id)).map((message) => message.doctorId ? message : { ...message, doctorId: patientProfiles[message.patientSlug]?.selectedDoctorId || 'DR-001' });
   const visibleFood = foodEntries;
   const visibleBolus = bolusEntries;
+  const durableSyncIssue = [...foodEntries, ...bolusEntries, ...glucoseEntries, ...messages].find((item) => item.syncState === 'conflict' || item.syncState === 'failed');
+  const displayedSyncError = durableSyncIssue
+    ? durableSyncIssue.syncState === 'conflict' ? 'A local entry conflicts with a server record and will not be retried automatically.' : 'A local entry remains saved on this device because it could not be uploaded.'
+    : syncError;
   const home = session?.role === 'patient' ? '/patient/dashboard' : session?.role === 'admin' ? '/admin' : '/dashboard';
   const signIn = async (identifier: string, password: string, mode: 'doctor' | 'patient') => {
     if (identifier.toLowerCase() === 'admin') {
@@ -272,7 +299,7 @@ export default function App() {
     <Route path="/login/doctor" element={session ? <Navigate to={home} replace /> : <Login mode="doctor" {...loginProps} />} />
     <Route path="/login/patient" element={session ? <Navigate to={home} replace /> : <Login mode="patient" {...loginProps} />} />
     <Route path="/login/admin" element={<Navigate to="/login" replace />} />
-    <Route path="/*" element={session && (session.role === 'admin' || account) ? <Shell session={session} account={account} accounts={accounts} assignments={assignments} ratings={ratings} setRatings={setRatings} allPatients={allPatients} patientProfiles={patientProfiles} messages={visibleMessages} setMessages={setMessages} foodEntries={visibleFood} setFoodEntries={setFoodEntries} bolusEntries={visibleBolus} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} syncError={syncError} setAssignments={setAssignments} onUpdateAccount={(updated) => {
+    <Route path="/*" element={session && (session.role === 'admin' || account) ? <Shell session={session} account={account} accounts={accounts} assignments={assignments} ratings={ratings} setRatings={setRatings} allPatients={allPatients} patientProfiles={patientProfiles} messages={visibleMessages} setMessages={setMessages} foodEntries={visibleFood} setFoodEntries={setFoodEntries} bolusEntries={visibleBolus} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} syncError={displayedSyncError} setAssignments={setAssignments} onUpdateAccount={(updated) => {
       if (updated.patientProfile && updated.patientProfile.selectedDoctorId !== account?.patientProfile?.selectedDoctorId) {
         setAssignments((current) => [...current.filter((item) => item.patientId !== updated.id), { patientId: updated.id, doctorId: updated.patientProfile!.selectedDoctorId, status: 'pending' }]);
       }

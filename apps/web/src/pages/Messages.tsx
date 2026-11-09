@@ -17,7 +17,7 @@ export function Messages({ role, doctorId, currentPatient, doctorName, patientRe
   const thread = useMemo(() => visibleMessages.filter((message) => message.patientSlug === activeSlug), [activeSlug, visibleMessages]);
   const send = () => {
     if (!draft.trim() || !patient || !activeSlug || (isPatient && assignmentStatus !== 'accepted')) return;
-    setMessages((current) => [...current, { id: crypto.randomUUID(), doctorId, patientSlug: activeSlug, patient: patient.name, avatar: patient.avatar, from: isPatient ? 'patient' : 'doctor', text: draft.trim(), time: 'Now', unread: isPatient }]);
+    setMessages((current) => [...current, { id: crypto.randomUUID(), doctorId, patientSlug: activeSlug, patient: patient.name, avatar: patient.avatar, from: isPatient ? 'patient' : 'doctor', text: draft.trim(), time: 'Now', sentAt: new Date().toISOString(), unread: isPatient, syncState: 'pending', syncAttempts: 0 }]);
     setDraft('');
   };
   return (

@@ -167,3 +167,42 @@ Existing `/api` response shapes are retained for the React and Flutter clients. 
 The existing admin screens still use frontend/demo state. This migration does not create an admin role, an admin provisioning API, or broad administrative access. New doctor accounts cannot be self-registered through `/api/auth/bridge`; they must be explicitly provisioned in a controlled process.
 
 Client-provided IDs keep identical creates idempotent, while a conflicting create returns HTTP 409. Meal edits use optimistic versions and retry-safe mutation IDs; broader durable offline conflict resolution is not claimed.
+
+## Client synchronization
+
+The React client persists an explicit upload state with each locally created glucose,
+meal, insulin, or message record. Snapshot records are server-authoritative and are never
+implicitly added to the upload queue. Pending local records survive a browser reload and
+are preserved while snapshots merge; successful uploads are acknowledged before a later
+snapshot replaces the local copy. Only one request per record may be in flight. Temporary
+failures use bounded backoff (at most five attempts), while HTTP 409 conflicts stop
+automatic retry and remain visible for review.
+
+Create idempotency compares normalized clinical values and timestamp instants rather than
+raw legacy JSON. Thus `2026-01-01T13:10:00Z` and
+`2026-01-01T13:10:00.000Z` are equivalent, while changed ownership, amounts, event times,
+sender identity, or other authoritative values still conflict. The browser queue is
+durable only in that browser's local storage; clearing site data removes unsynchronized
+local entries, and there is no cross-device offline queue.
+
+## Emergency contacts
+
+Patient profile screens in React and the active Flutter app manage structured emergency
+contacts through `/api/emergency-contacts`. Patients can add, edit, delete, and select one
+primary contact. Phone numbers are text in international form, for example
+`+201001234567`. Contacts are stored for reference; adding one does not send an alert or
+place a call. These endpoints remain patient-only.
+
+The older `patientProfile.emergencyContact` free-text value remains visible as legacy
+information but is not editable alongside structured contacts, parsed automatically, or
+deleted. The patient must explicitly create a structured contact after reviewing it.
+
+Local verification from the repository root:
+
+```bash
+npm run test:api                 # requires dedicated TEST_DATABASE_URL
+npm run build:web
+cd apps/mobile
+flutter analyze lib/patient_app.dart lib/data/sync_api.dart
+flutter test
+```

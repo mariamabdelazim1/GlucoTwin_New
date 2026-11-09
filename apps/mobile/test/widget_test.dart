@@ -20,7 +20,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final demo = jsonDecode(File('../src/data/demoPatient.json').readAsStringSync()) as Map<String, dynamic>;
+    final demo = jsonDecode(File('../web/src/data/demoPatient.json').readAsStringSync()) as Map<String, dynamic>;
     await tester.pumpWidget(MaterialApp(home: PatientPortal(
       api: SyncApi(), account: const {'id': 'omar-hassan', 'email': 'omar.hassan@example.com', 'patientProfile': {'fullName': 'Omar Hassan', 'age': '34', 'weight': '82', 'height': '178'}},
       snapshot: {'demo': demo, 'food': demo['food'], 'bolus': demo['bolus']}, error: null,

@@ -162,6 +162,7 @@ export async function snapshot(db, user) {
   const food = (await queryVisible(`SELECT * FROM meals WHERE patient_id=ANY($1::text[]) ORDER BY planned_eating_at DESC`)).map(mealJson);
   const bolus = (await queryVisible(`SELECT * FROM insulin_doses WHERE patient_id=ANY($1::text[]) ORDER BY administered_at DESC`)).map((row) => ({
     ...(row.legacy_payload || {}), id: row.id, patientSlug: row.patient_id,
+    administeredUnits: Number(row.administered_units), administeredAt: row.administered_at.toISOString(),
   }));
   const messages = (await db.query(`SELECT m.*, c.patient_id, c.doctor_id, sender.role sender_role
     FROM messages m JOIN conversations c ON c.id=m.conversation_id JOIN users sender ON sender.id=m.sender_id
@@ -169,7 +170,7 @@ export async function snapshot(db, user) {
     ORDER BY m.sent_at, m.id`, [user.id])).rows.map((row) => ({
       ...(row.legacy_payload || {}), id: row.id, doctorId: row.doctor_id, patientSlug: row.patient_id,
       from: row.sender_role, text: row.body, unread: !row.is_read,
-      time: row.legacy_payload?.time || row.sent_at.toISOString(),
+      sentAt: row.sent_at.toISOString(), time: row.legacy_payload?.time || row.sent_at.toISOString(),
     }));
   return {
     account: accountFromRow(await accountById(db, user.id)), ...directory, patients,
@@ -217,10 +218,46 @@ export async function audit(db, actor, eventType, entityType, entityId, metadata
     VALUES($1,$2,$3,$4,$5,$6)`, [newId('audit'), actor, eventType, entityType, entityId, JSON.stringify(metadata)]);
 }
 
-async function idempotentInsert(db, table, id, patientId, payload, insert) {
-  const existing = (await db.query(`SELECT patient_id, legacy_payload = $2::jsonb same_payload FROM ${table} WHERE id=$1`, [id, JSON.stringify(payload)])).rows[0];
+const sameNumber = (left, right) => left === null && right === null || left !== null && right !== null && Number(left) === Number(right);
+const sameInstant = (left, right) => left === null && right === null || left && right && new Date(left).getTime() === new Date(right).getTime();
+
+function sameOriginalMeal(row, expected) {
+  try {
+    const item = row.legacy_payload || {};
+    const legacy = Object.hasOwn(item, 'carbs');
+    const announced = legacy ? strictUnit(item.carbs, 'g', 'Announced carbohydrates') : optionalNumber(item.announcedCarbsG, 'Announced carbohydrates');
+    const status = ['planned', 'eaten', 'cancelled'].includes(item.status) ? item.status : legacy ? 'planned' : item.status || 'planned';
+    let consumed = optionalNumber(item.consumedCarbsG, 'Consumed carbohydrates');
+    if (item.confirmAnnouncedAmount === true) consumed = announced;
+    if (status !== 'eaten') consumed = null;
+    return (item.meal || null) === expected.mealName && (item.items || item.description || null) === expected.description
+      && sameNumber(announced, expected.announced) && sameInstant(item.plannedEatingAt, expected.plannedAt)
+      && status === expected.status && sameInstant(status === 'eaten' ? item.actualEatingAt : null, expected.actualAt)
+      && sameNumber(consumed, expected.consumed) && (item.decisionSource || 'user_chosen') === expected.decisionSource
+      && (item.recommendationId || null) === expected.recommendationId;
+  } catch { return false; }
+}
+
+function sameClinicalRecord(table, row, expected) {
+  if (table === 'glucose_readings') return sameNumber(row.glucose_mg_dl, expected.value)
+    && sameInstant(row.measured_at, expected.measuredAt) && row.source === expected.source;
+  if (table === 'insulin_doses') return sameNumber(row.administered_units, expected.units)
+    && sameInstant(row.administered_at, expected.administeredAt) && row.decision_source === expected.decisionSource
+    && row.recommendation_id === expected.recommendationId;
+  if (table === 'meals') return row.meal_name === expected.mealName
+    && row.description === expected.description && sameNumber(row.announced_carbs_g, expected.announced)
+    && sameInstant(row.planned_eating_at, expected.plannedAt) && row.status === expected.status
+    && sameInstant(row.actual_eating_at, expected.actualAt) && sameNumber(row.consumed_carbs_g, expected.consumed)
+    && row.decision_source === expected.decisionSource && row.recommendation_id === expected.recommendationId
+    || row.version > 1 && sameOriginalMeal(row, expected);
+  return false;
+}
+
+async function idempotentInsert(db, table, id, patientId, expected, insert) {
+  await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`${table}:${id}`]);
+  const existing = (await db.query(`SELECT * FROM ${table} WHERE id=$1`, [id])).rows[0];
   if (existing) {
-    if (existing.patient_id === patientId && existing.same_payload) return false;
+    if (existing.patient_id === patientId && sameClinicalRecord(table, existing, expected)) return false;
     throw new ApiError(409, 'Existing ID conflicts with different ownership or content');
   }
   await insert();
@@ -236,16 +273,20 @@ export async function addPatientRecord(pool, kind, item, user) {
       const value = optionalNumber(item.value ?? item.glucoseMgDl, 'Glucose');
       if (value === null) throw new ApiError(400, 'Glucose must be a finite nonnegative number');
       const measuredAt = timestamp(item.recordedAt ?? item.measuredAt, 'Glucose recordedAt');
-      created = await idempotentInsert(db, 'glucose_readings', item.id, user.id, item, () => db.query(`INSERT INTO glucose_readings
+      created = await idempotentInsert(db, 'glucose_readings', item.id, user.id,
+        { value, measuredAt, source: item.source || 'manual' }, () => db.query(`INSERT INTO glucose_readings
         (id,patient_id,measured_at,glucose_mg_dl,source,legacy_payload) VALUES($1,$2,$3,$4,$5,$6)`,
         [item.id, user.id, measuredAt, value, item.source || 'manual', JSON.stringify(item)]));
     } else if (kind === 'bolus') {
       const units = strictUnit(item.administeredUnits ?? item.recorded, 'U', 'Administered insulin');
       const administeredAt = timestamp(item.administeredAt, 'Insulin administeredAt');
-      created = await idempotentInsert(db, 'insulin_doses', item.id, user.id, item, () => db.query(`INSERT INTO insulin_doses
+      const decisionSource = item.decisionSource || 'user_decided';
+      const recommendationId = item.recommendationId || null;
+      created = await idempotentInsert(db, 'insulin_doses', item.id, user.id,
+        { units, administeredAt, decisionSource, recommendationId }, () => db.query(`INSERT INTO insulin_doses
         (id,patient_id,administered_units,administered_at,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [item.id, user.id, units, administeredAt,
-        item.decisionSource || 'user_decided', item.recommendationId || null,
+        decisionSource, recommendationId,
         JSON.stringify(item.confirmationProvenance || { source: 'patient_log' }), JSON.stringify(item)]));
     } else if (kind === 'food') {
       const legacy = Object.hasOwn(item, 'carbs');
@@ -263,12 +304,17 @@ export async function addPatientRecord(pool, kind, item, user) {
         throw new ApiError(400, 'Planned and cancelled meals cannot contain confirmed consumption or an actual eating time');
       }
       if (status !== 'eaten') consumed = null;
-      created = await idempotentInsert(db, 'meals', item.id, user.id, item, () => db.query(`INSERT INTO meals
+      const mealName = item.meal || null;
+      const description = item.items || item.description || null;
+      const decisionSource = item.decisionSource || 'user_chosen';
+      const recommendationId = item.recommendationId || null;
+      created = await idempotentInsert(db, 'meals', item.id, user.id,
+        { mealName, description, announced, plannedAt, status, actualAt, consumed, decisionSource, recommendationId }, () => db.query(`INSERT INTO meals
         (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,
          consumed_carbs_g,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [item.id, user.id, item.meal || null,
-        item.items || item.description || null, announced, plannedAt, status, actualAt, consumed,
-        item.decisionSource || 'user_chosen', item.recommendationId || null,
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [item.id, user.id, mealName,
+        description, announced, plannedAt, status, actualAt, consumed,
+        decisionSource, recommendationId,
         JSON.stringify(status === 'eaten' ? { source: item.confirmAnnouncedAmount === true ? 'patient_confirmed_announced' : 'patient_entered_actual' } : {}), JSON.stringify(item)]));
     } else throw new ApiError(404, 'Unknown record type');
     if (created) await audit(db, user.id, `${kind}.created`, kind, item.id);
@@ -348,6 +394,7 @@ export async function addMessage(pool, item, user) {
   if (!item?.id || !item?.patientSlug) throw new ApiError(400, 'Message ID and patient are required');
   if (item.from !== user.role) throw new ApiError(403, 'Invalid sender');
   return withTransaction(pool, async (db) => {
+    await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`messages:${item.id}`]);
     const assignment = await currentAcceptedAssignment(db, item.patientSlug);
     if (!assignment || (user.role === 'doctor' ? assignment.doctor_id !== user.id : item.patientSlug !== user.id)) {
       throw new ApiError(403, 'Messaging opens after doctor acceptance');
@@ -355,14 +402,16 @@ export async function addMessage(pool, item, user) {
     let conversation = (await db.query(`SELECT * FROM conversations WHERE assignment_id=$1`, [assignment.id])).rows[0];
     if (!conversation) conversation = (await db.query(`INSERT INTO conversations(id,patient_id,doctor_id,assignment_id,status)
       VALUES($1,$2,$3,$4,'active') RETURNING *`, [newId('conversation'), item.patientSlug, assignment.doctor_id, assignment.id])).rows[0];
-    const existing = (await db.query('SELECT conversation_id,legacy_payload = $2::jsonb same_payload FROM messages WHERE id=$1', [item.id, JSON.stringify(item)])).rows[0];
+    const sentAt = item.sentAt ? timestamp(item.sentAt, 'Message sentAt') : null;
+    const existing = (await db.query('SELECT conversation_id,sender_id,body,sent_at FROM messages WHERE id=$1', [item.id])).rows[0];
     if (existing) {
-      if (existing.conversation_id === conversation.id && existing.same_payload) return { ok: true };
+      if (existing.conversation_id === conversation.id && existing.sender_id === user.id && existing.body === item.text
+        && (sentAt === null || sameInstant(existing.sent_at, sentAt))) return { ok: true };
       throw new ApiError(409, 'Existing ID conflicts with different conversation or content');
     }
     await db.query(`INSERT INTO messages(id,conversation_id,sender_id,body,sent_at,is_read,legacy_payload)
       VALUES($1,$2,$3,$4,$5,$6,$7)`, [item.id, conversation.id, user.id, item.text,
-      item.sentAt ? timestamp(item.sentAt, 'Message sentAt') : new Date(), item.unread === false, JSON.stringify(item)]);
+      sentAt || new Date(), item.unread === false, JSON.stringify(item)]);
     await audit(db, user.id, 'message.created', 'message', item.id, { conversationId: conversation.id });
     return { ok: true };
   });
@@ -389,12 +438,12 @@ export async function emergencyContacts(db, patientId) {
 
 export async function createEmergencyContact(pool, patientId, input) {
   return withTransaction(pool, async (db) => {
-    if (!input.contactName || !input.relationship || !input.phoneNumber) throw new ApiError(400, 'Contact name, relationship, and phone number are required');
+    if (typeof input.contactName !== 'string' || !input.contactName.trim() || typeof input.relationship !== 'string' || !input.relationship.trim() || typeof input.phoneNumber !== 'string') throw new ApiError(400, 'Contact name, relationship, and phone number are required');
     if (!/^\+[1-9][0-9]{5,14}$/.test(input.phoneNumber)) throw new ApiError(400, 'Phone number must include a country code, for example +201001234567');
     if (input.isPrimary) await db.query('UPDATE patient_emergency_contacts SET is_primary=false WHERE patient_id=$1 AND is_primary', [patientId]);
     const id = input.id || newId('contact');
     const row = (await db.query(`INSERT INTO patient_emergency_contacts(id,patient_id,contact_name,relationship,phone_number,is_primary)
-      VALUES($1,$2,$3,$4,$5,$6) RETURNING *`, [id, patientId, input.contactName, input.relationship, input.phoneNumber, Boolean(input.isPrimary)])).rows[0];
+      VALUES($1,$2,$3,$4,$5,$6) RETURNING *`, [id, patientId, input.contactName.trim(), input.relationship.trim(), input.phoneNumber, Boolean(input.isPrimary)])).rows[0];
     await audit(db, patientId, 'emergency_contact.created', 'emergency_contact', id);
     return row;
   });
@@ -402,13 +451,15 @@ export async function createEmergencyContact(pool, patientId, input) {
 
 export async function updateEmergencyContact(pool, patientId, id, input) {
   return withTransaction(pool, async (db) => {
+    if (input.contactName !== undefined && (typeof input.contactName !== 'string' || !input.contactName.trim())) throw new ApiError(400, 'Contact name cannot be blank');
+    if (input.relationship !== undefined && (typeof input.relationship !== 'string' || !input.relationship.trim())) throw new ApiError(400, 'Relationship cannot be blank');
     if (input.phoneNumber !== undefined && !/^\+[1-9][0-9]{5,14}$/.test(input.phoneNumber)) throw new ApiError(400, 'Phone number must include a country code');
     if (input.isPrimary) await db.query('UPDATE patient_emergency_contacts SET is_primary=false WHERE patient_id=$1 AND id<>$2 AND is_primary', [patientId, id]);
     const row = (await db.query(`UPDATE patient_emergency_contacts SET
       contact_name=COALESCE($3,contact_name), relationship=COALESCE($4,relationship),
       phone_number=COALESCE($5,phone_number), is_primary=COALESCE($6,is_primary)
-      WHERE patient_id=$1 AND id=$2 RETURNING *`, [patientId, id, input.contactName ?? null,
-      input.relationship ?? null, input.phoneNumber ?? null, input.isPrimary ?? null])).rows[0];
+      WHERE patient_id=$1 AND id=$2 RETURNING *`, [patientId, id, input.contactName?.trim() ?? null,
+      input.relationship?.trim() ?? null, input.phoneNumber ?? null, input.isPrimary ?? null])).rows[0];
     if (!row) throw new ApiError(404, 'Emergency contact not found');
     await audit(db, patientId, 'emergency_contact.updated', 'emergency_contact', id);
     return row;

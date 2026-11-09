@@ -5,6 +5,7 @@ import type { Account, DoctorProfileData, DoctorRating, PatientProfile } from '.
 import { Avatar } from '../components/ui/Avatar';
 import { DoctorDirectory } from '../components/doctors/DoctorDirectory';
 import { PageHeader } from '../components/ui/PageHeader';
+import { EmergencyContacts } from '../components/profile/EmergencyContacts';
 
 const field = 'focus-ring mt-1 w-full rounded-md border border-clinical-border bg-white px-3 py-2 font-normal';
 const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
@@ -77,9 +78,9 @@ export function DoctorProfile({ account, accounts, ratings, onSave }: { account:
             <label className="text-sm font-semibold">Insulin plan<input value={patient.insulinPlan} onChange={(event) => setPatient({ ...patient, insulinPlan: event.target.value })} className={field} /></label>
             <label className="text-sm font-semibold sm:col-span-2">Medications<input value={patient.medications} onChange={(event) => setPatient({ ...patient, medications: event.target.value })} className={field} /></label>
             <label className="text-sm font-semibold">Allergies<input value={patient.allergies} onChange={(event) => setPatient({ ...patient, allergies: event.target.value })} className={field} /></label>
-            <label className="text-sm font-semibold">Emergency contact<input value={patient.emergencyContact} onChange={(event) => setPatient({ ...patient, emergencyContact: event.target.value })} className={field} /></label>
           </>}
         </div>
+        {!isDoctor ? <EmergencyContacts legacyValue={patient.emergencyContact} /> : null}
         {isDoctor ? <div className="border-t border-clinical-border pt-5">
           <h3 className="font-semibold">Certificate and paper files</h3>
           <div className="mt-3 flex flex-wrap gap-2">{(['certificate', 'paper'] as const).map((kind) => <label key={kind} className="focus-ring inline-flex cursor-pointer items-center gap-2 rounded-md border border-clinical-border px-3 py-2 text-sm font-semibold text-clinical-primary"><FilePlus2 size={16} /> Add {kind}<input className="sr-only" type="file" accept=".pdf,image/*" multiple onChange={(event) => void upload(event, kind)} /></label>)}</div>

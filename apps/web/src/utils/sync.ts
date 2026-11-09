@@ -1,4 +1,5 @@
 import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message } from '../types';
+export { mergeById } from './syncState';
 
 export interface GlucoseEntry {
   id: string;
@@ -6,6 +7,14 @@ export interface GlucoseEntry {
   value: number;
   time: string;
   recordedAt: string;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
+}
+
+export class SyncApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
 }
 
 export interface SyncSnapshot {
@@ -20,6 +29,14 @@ export interface SyncSnapshot {
   ratings: DoctorRating[];
 }
 
+export interface EmergencyContact {
+  id: string;
+  contactName: string;
+  relationship: string;
+  phoneNumber: string;
+  isPrimary: boolean;
+}
+
 async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<T> {
   const token = sessionStorage.getItem('ddt.sync.token');
   const response = await fetch(`/api/${path}`, {
@@ -28,7 +45,7 @@ async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<
     body: payload ? JSON.stringify(payload) : undefined,
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Sync request failed');
+  if (!response.ok) throw new SyncApiError(response.status, result.error || 'Sync request failed');
   return result as T;
 }
 
@@ -48,21 +65,7 @@ export const syncItem = (kind: 'food' | 'bolus' | 'glucose' | 'messages', item: 
 export const updateMeal = (id: string, update: unknown) => api<{ ok: boolean; meal: FoodEntry }>(`food/${encodeURIComponent(id)}`, 'PATCH', update);
 export const syncAssignment = (patientId: string, status: 'accepted' | 'declined') => api('assignment', 'POST', { patientId, status });
 export const syncRating = (doctorId: string, score: number) => api<{ ratings: DoctorRating[] }>('rating', 'POST', { doctorId, score });
-
-export function mergeById<T extends { id: string; version?: number }>(local: T[], remote: T[]) {
-  if (!remote.length) return local;
-  const remoteById = new Map(remote.map((item) => [item.id, item]));
-  let changed = false;
-  const merged = local.map((item) => {
-    const next = remoteById.get(item.id);
-    if (!next) return item;
-    remoteById.delete(item.id);
-    const replace = next.version !== undefined
-      ? item.version === undefined || next.version >= item.version
-      : JSON.stringify(next) !== JSON.stringify(item);
-    if (replace && JSON.stringify(next) !== JSON.stringify(item)) changed = true;
-    return replace ? next : item;
-  });
-  if (remoteById.size) changed = true;
-  return changed ? [...remoteById.values(), ...merged] : local;
-}
+export const getEmergencyContacts = () => api<{ contacts: EmergencyContact[] }>('emergency-contacts');
+export const createEmergencyContact = (contact: Omit<EmergencyContact, 'id'>) => api<{ contact: EmergencyContact }>('emergency-contacts', 'POST', contact);
+export const updateEmergencyContact = (id: string, contact: Partial<Omit<EmergencyContact, 'id'>>) => api<{ contact: EmergencyContact }>(`emergency-contacts/${encodeURIComponent(id)}`, 'PUT', contact);
+export const deleteEmergencyContact = (id: string) => api<{ ok: boolean }>(`emergency-contacts/${encodeURIComponent(id)}`, 'DELETE');

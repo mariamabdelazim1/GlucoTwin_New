@@ -101,6 +101,11 @@ export interface Message {
   text: string;
   time: string;
   unread?: boolean;
+  sentAt?: string;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
 }
 
 export interface FoodEntry {
@@ -120,6 +125,10 @@ export interface FoodEntry {
   version?: number;
   updatedAt?: string;
   confirmAnnouncedAmount?: boolean;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
 }
 
 export interface BolusEntry {
@@ -133,6 +142,10 @@ export interface BolusEntry {
   recommended: string;
   recorded: string;
   administeredAt?: string;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
 }
 
 export interface NotificationItem {

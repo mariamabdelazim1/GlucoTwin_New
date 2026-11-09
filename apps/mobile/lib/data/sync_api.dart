@@ -50,4 +50,9 @@ class SyncApi {
   Future<void> add(String kind, Map<String, dynamic> item) async { await request(kind, method: 'POST', data: item); }
   Future<Map<String, dynamic>> updateMeal(String id, Map<String, dynamic> update) async =>
       (await request('food/${Uri.encodeComponent(id)}', method: 'PATCH', data: update))['meal'] as Map<String, dynamic>;
+  Future<List<Map<String, dynamic>>> emergencyContacts() async =>
+      ((await request('emergency-contacts'))['contacts'] as List).cast<Map<String, dynamic>>();
+  Future<void> createEmergencyContact(Map<String, dynamic> contact) async { await request('emergency-contacts', method: 'POST', data: contact); }
+  Future<void> updateEmergencyContact(String id, Map<String, dynamic> contact) async { await request('emergency-contacts/${Uri.encodeComponent(id)}', method: 'PUT', data: contact); }
+  Future<void> deleteEmergencyContact(String id) async { await request('emergency-contacts/${Uri.encodeComponent(id)}', method: 'DELETE'); }
 }

@@ -227,12 +227,18 @@ class PatientPortal extends StatefulWidget {
   State<PatientPortal> createState() => _PatientPortalState();
 }
 
-class _PatientPortalState extends State<PatientPortal> {
+class _PatientPortalState extends State<PatientPortal> with WidgetsBindingObserver {
   int tab = 0;
+  List<Map<String, dynamic>> contacts = [];
+  bool contactsLoading = false;
+  bool contactsSaving = false;
+  String? contactsError;
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     tab = switch (Uri.base.queryParameters['view']) { 'record' => 1, 'care' => 2, 'profile' => 3, _ => 0 };
+    _loadContacts();
   }
   String? actionError;
   final draft = TextEditingController();
@@ -251,22 +257,37 @@ class _PatientPortalState extends State<PatientPortal> {
     try { await widget.api.add(kind, item); await widget.onRefresh(); if (mounted) setState(() => actionError = null); }
     catch (e) { if (mounted) setState(() => actionError = e.toString().replaceFirst('Exception: ', '')); }
   }
+  Future<void> _loadContacts() async {
+    if (contactsLoading) return;
+    if (mounted) setState(() => contactsLoading = true);
+    try { final value = await widget.api.emergencyContacts(); if (mounted) setState(() { contacts = value; contactsError = null; }); }
+    catch (error) { if (mounted) setState(() => contactsError = error.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => contactsLoading = false); }
+  }
+  Future<void> _refreshAll() async {
+    await widget.onRefresh();
+    if (tab == 3) await _loadContacts();
+  }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadContacts();
+  }
   String get nowLabel => TimeOfDay.now().format(context);
   String get nextId => DateTime.now().microsecondsSinceEpoch.toRadixString(36);
   @override
-  void dispose() { draft.dispose(); super.dispose(); }
+  void dispose() { WidgetsBinding.instance.removeObserver(this); draft.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
     final titles = ['Overview', 'Record', 'Care team', 'Profile'];
     return Scaffold(
-      appBar: AppBar(title: Text(titles[tab]), actions: [IconButton(tooltip: 'Refresh', onPressed: widget.onRefresh, icon: const Icon(Icons.refresh))]),
-      body: RefreshIndicator(onRefresh: widget.onRefresh, child: ListView(padding: const EdgeInsets.all(16), children: [
+      appBar: AppBar(title: Text(titles[tab]), actions: [IconButton(tooltip: 'Refresh', onPressed: _refreshAll, icon: const Icon(Icons.refresh))]),
+      body: RefreshIndicator(onRefresh: _refreshAll, child: ListView(padding: const EdgeInsets.all(16), children: [
         if (widget.error != null) _notice(widget.error!),
         if (actionError != null) _notice(actionError!),
         if (tab == 0) _overview(), if (tab == 1) _records(), if (tab == 2) _care(), if (tab == 3) _profile(),
       ])),
-      bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (value) => setState(() => tab = value), destinations: const [
+      bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (value) { setState(() => tab = value); if (value == 3) _loadContacts(); }, destinations: const [
         NavigationDestination(icon: Icon(Icons.space_dashboard_outlined), label: 'Overview'),
         NavigationDestination(icon: Icon(Icons.add_chart_outlined), label: 'Record'),
         NavigationDestination(icon: Icon(Icons.forum_outlined), label: 'Care'),
@@ -444,6 +465,52 @@ class _PatientPortalState extends State<PatientPortal> {
     }
   }
 
+  Future<void> _contactDialog([Map<String, dynamic>? existing]) async {
+    final name = TextEditingController(text: '${existing?['contactName'] ?? ''}');
+    final relationship = TextEditingController(text: '${existing?['relationship'] ?? ''}');
+    final phone = TextEditingController(text: '${existing?['phoneNumber'] ?? ''}');
+    bool primary = existing?['isPrimary'] == true;
+    String? dialogError;
+    final value = await showDialog<Map<String, dynamic>>(context: context, builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+      title: Text(existing == null ? 'Add emergency contact' : 'Edit emergency contact'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: name, decoration: const InputDecoration(labelText: 'Name')),
+        const SizedBox(height: 10), TextField(controller: relationship, decoration: const InputDecoration(labelText: 'Relationship')),
+        const SizedBox(height: 10), TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone with country code', hintText: '+201001234567')),
+        CheckboxListTile(contentPadding: EdgeInsets.zero, value: primary, onChanged: (value) => update(() => primary = value ?? false), title: const Text('Primary contact')),
+        if (dialogError != null) Text(dialogError!, style: const TextStyle(color: Colors.red)),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: () {
+        if (name.text.trim().isEmpty || relationship.text.trim().isEmpty || !RegExp(r'^\+[1-9][0-9]{5,14}$').hasMatch(phone.text)) { update(() => dialogError = 'Use a phone number with country code, such as +201001234567.'); return; }
+        Navigator.pop(context, {'contactName': name.text.trim(), 'relationship': relationship.text.trim(), 'phoneNumber': phone.text, 'isPrimary': primary});
+      }, child: const Text('Save'))],
+    )));
+    name.dispose(); relationship.dispose(); phone.dispose();
+    if (value == null || contactsSaving) return;
+    setState(() { contactsSaving = true; contactsError = null; });
+    try { if (existing == null) { await widget.api.createEmergencyContact(value); } else { await widget.api.updateEmergencyContact('${existing['id']}', value); } await _loadContacts(); }
+    catch (error) { if (mounted) setState(() => contactsError = error.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => contactsSaving = false); }
+  }
+
+  Future<void> _deleteContact(Map<String, dynamic> contact) async {
+    if (contactsSaving) return;
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: const Text('Delete emergency contact?'), content: Text('Remove ${contact['contactName']} from your contacts?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete'))]));
+    if (confirmed != true) return;
+    setState(() => contactsSaving = true);
+    try { await widget.api.deleteEmergencyContact('${contact['id']}'); await _loadContacts(); }
+    catch (error) { if (mounted) setState(() => contactsError = error.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => contactsSaving = false); }
+  }
+
+  Future<void> _makePrimary(Map<String, dynamic> contact) async {
+    if (contactsSaving || contact['isPrimary'] == true) return;
+    setState(() => contactsSaving = true);
+    try { await widget.api.updateEmergencyContact('${contact['id']}', {'isPrimary': true}); await _loadContacts(); }
+    catch (error) { if (mounted) setState(() => contactsError = error.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => contactsSaving = false); }
+  }
+
   Widget _care() {
     final doctorProfile = doctor?['doctorProfile'] as Map<String, dynamic>? ?? {};
     final connected = assignment?['status'] == 'accepted';
@@ -477,7 +544,15 @@ class _PatientPortalState extends State<PatientPortal> {
       _detail('Diagnosis year', '${profile['diagnosisYear'] ?? ''}'),
       _detail('Medications', '${profile['medications'] ?? ''}'),
       _detail('Allergies', '${profile['allergies'] ?? ''}'),
-      _detail('Emergency contact', '${profile['emergencyContact'] ?? ''}'),
+    ])),
+    if ('${profile['emergencyContact'] ?? ''}'.trim().isNotEmpty) _panel('Legacy emergency-contact information', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${profile['emergencyContact']}'), const SizedBox(height: 6), const Text('Review this text and explicitly add a structured contact. It is not parsed or deleted automatically.', style: TextStyle(color: muted, fontSize: 12))])),
+    _panel('Emergency contacts', Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('Stored for reference only. Adding a contact does not call or alert anyone.', style: TextStyle(color: muted, fontSize: 12)),
+      if (contactsLoading) const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator())),
+      if (!contactsLoading && contacts.isEmpty) _empty('No structured emergency contacts yet.'),
+      ...contacts.map((contact) => ListTile(contentPadding: EdgeInsets.zero, title: Text('${contact['contactName']}${contact['isPrimary'] == true ? ' · Primary' : ''}'), subtitle: Text('${contact['relationship']} · ${contact['phoneNumber']}'), trailing: PopupMenuButton<String>(enabled: !contactsSaving, onSelected: (action) { if (action == 'edit') _contactDialog(contact); if (action == 'primary') _makePrimary(contact); if (action == 'delete') _deleteContact(contact); }, itemBuilder: (_) => [const PopupMenuItem(value: 'edit', child: Text('Edit')), if (contact['isPrimary'] != true) const PopupMenuItem(value: 'primary', child: Text('Make primary')), const PopupMenuItem(value: 'delete', child: Text('Delete'))]))),
+      if (contactsError != null) Text(contactsError!, style: const TextStyle(color: Colors.red)),
+      const SizedBox(height: 8), FilledButton.icon(onPressed: contactsSaving ? null : () => _contactDialog(), icon: const Icon(Icons.add), label: Text(contactsSaving ? 'Saving…' : 'Add contact')),
     ])),
     _panel('Basal plan', _empty('An AI-suggested basal schedule requires confirmation by your doctor. No confirmed schedule is available here yet.')),
     OutlinedButton.icon(onPressed: widget.onSignOut, icon: const Icon(Icons.logout), label: const Text('Sign out')),
