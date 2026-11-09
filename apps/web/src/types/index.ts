@@ -58,9 +58,12 @@ export interface Account {
 }
 
 export interface CareAssignment {
+  id?: string;
   patientId: string;
   doctorId: string;
   status: 'pending' | 'accepted' | 'declined';
+  requestedAt?: string;
+  respondedAt?: string | null;
 }
 
 export interface DoctorRating {

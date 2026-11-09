@@ -70,6 +70,8 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
         patientProfile: { fullName: id, age: '30', weight: '70', height: '170', diabetesType: 'Type 1 Diabetes', selectedDoctorId: doctorId },
       } } });
       assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(result.body.assignment.status, 'pending');
+      assert.equal(result.body.assignment.doctorId, doctorId);
       return result.body.token;
     };
     const first = await register(firstId);
@@ -124,7 +126,9 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(collidingId.status, 409);
     const doctorOne = await login('sarah.ahmed@clinic.example', 'password', 'doctor');
     const doctorTwo = await login('khaled.mansour@clinic.example', 'password', 'doctor');
-    const doctorAccount = (await request('auth/login', { method: 'POST', data: { email: 'reem.osman@clinic.example', password: 'password', role: 'doctor' } })).body.account;
+    const doctorThreeLogin = await request('auth/login', { method: 'POST', data: { email: 'reem.osman@clinic.example', password: 'password', role: 'doctor' } });
+    const doctorThree = doctorThreeLogin.body.token;
+    const doctorAccount = doctorThreeLogin.body.account;
     let doctorProfileUpdate = await bridgeProfile({ ...doctorAccount, doctorProfile: { ...doctorAccount.doctorProfile, yearsExperience: ' ' } }, 'password');
     assert.equal(doctorProfileUpdate.status, 200, JSON.stringify(doctorProfileUpdate.body));
     assert.equal((await db.query("SELECT years_experience FROM doctor_profiles WHERE user_id='DR-003'")).rows[0].years_experience, null);
@@ -139,6 +143,58 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(doctorProfileUpdate.status, 200);
     assert.equal((await db.query("SELECT years_experience FROM doctor_profiles WHERE user_id='DR-003'")).rows[0].years_experience, 10);
     assert.equal((await bridgeProfile({ ...doctorProfileUpdate.body.account, doctorProfile: { ...doctorProfileUpdate.body.account.doctorProfile, yearsExperience: false } }, 'password')).status, 400);
+
+    const journeyId = `journey-${runId}`;
+    const journey = await register(journeyId);
+    assert.equal(Number((await db.query('SELECT count(*) FROM care_assignments WHERE patient_id=$1', [journeyId])).rows[0].count), 1);
+    assert.equal((await request('snapshot', { token: doctorOne })).body.assignments.some((item) => item.patientId === journeyId && item.status === 'pending'), true);
+    const declinedJourney = await request('assignment', { token: doctorOne, method: 'POST', data: { patientId: journeyId, status: 'declined' } });
+    assert.equal(declinedJourney.status, 200);
+    assert.equal(declinedJourney.body.assignment.status, 'declined');
+    assert.equal((await request('assignment', { token: doctorOne, method: 'POST', data: { patientId: journeyId, status: 'declined' } })).status, 200);
+    assert.equal((await request('assignment', { token: doctorTwo, method: 'POST', data: { patientId: journeyId, status: 'accepted' } })).status, 400);
+    assert.equal(Number((await db.query('SELECT count(*) FROM conversations WHERE patient_id=$1', [journeyId])).rows[0].count), 0);
+
+    const journeyLogin = await request('auth/login', { method: 'POST', data: { email: `${journeyId}@example.test`, password: 'test-password', role: 'patient' } });
+    assert.equal(journeyLogin.status, 200);
+    assert.equal((await request('snapshot', { token: journeyLogin.body.token })).body.assignments.find((item) => item.doctorId === 'DR-001').status, 'declined');
+    assert.equal(Number((await db.query('SELECT count(*) FROM care_assignments WHERE patient_id=$1', [journeyId])).rows[0].count), 1);
+
+    const journeyRoundTrip = await request('auth/bridge', { method: 'POST', data: { account: {
+      ...journeyLogin.body.account, password: 'test-password',
+      patientProfile: { ...journeyLogin.body.account.patientProfile, fullName: 'Profile Edited Without Request' },
+    } } });
+    assert.equal(journeyRoundTrip.status, 200, JSON.stringify(journeyRoundTrip.body));
+    assert.equal(journeyRoundTrip.body.assignment, null);
+    const journeyProfile = await request('profile', { token: journey, method: 'PUT', data: { profile: {
+      ...journeyRoundTrip.body.account.patientProfile, medications: 'Profile-only edit',
+    } } });
+    assert.equal(journeyProfile.status, 200, JSON.stringify(journeyProfile.body));
+    assert.equal(Number((await db.query('SELECT count(*) FROM care_assignments WHERE patient_id=$1', [journeyId])).rows[0].count), 1);
+
+    const retriedJourney = await request('patient/doctor-request', { token: journey, method: 'POST', data: { doctorId: 'DR-001' } });
+    assert.equal(retriedJourney.status, 200);
+    assert.equal(retriedJourney.body.assignment.status, 'pending');
+    assert.equal(Number((await db.query('SELECT count(*) FROM care_assignments WHERE patient_id=$1', [journeyId])).rows[0].count), 2);
+    assert.equal((await request('patient/doctor-request', { token: journey, method: 'POST', data: { doctorId: 'DR-001' } })).body.assignment.id, retriedJourney.body.assignment.id);
+    assert.equal(Number((await db.query('SELECT count(*) FROM care_assignments WHERE patient_id=$1', [journeyId])).rows[0].count), 2);
+
+    const switchedJourney = await request('patient/doctor-request', { token: journey, method: 'POST', data: { doctorId: 'DR-002' } });
+    assert.equal(switchedJourney.status, 200);
+    const journeyHistory = (await db.query('SELECT doctor_id,status FROM care_assignments WHERE patient_id=$1', [journeyId])).rows;
+    assert.deepEqual(journeyHistory.map((item) => `${item.doctor_id}:${item.status}`).sort(), ['DR-001:declined', 'DR-001:ended', 'DR-002:pending']);
+
+    const publicBio = `Updated public biography ${runId}`;
+    const profileSaved = await request('profile', { token: doctorThree, method: 'PUT', data: { profile: {
+      ...doctorProfileUpdate.body.account.doctorProfile, bio: publicBio, fullName: 'Dr. Reem Osman Updated',
+    } } });
+    assert.equal(profileSaved.status, 200, JSON.stringify(profileSaved.body));
+    assert.equal(profileSaved.body.account.doctorProfile.bio, publicBio);
+    const publicDoctor = (await request('doctors')).body.doctors.find((item) => item.id === 'DR-003');
+    assert.equal(publicDoctor.doctorProfile.bio, publicBio);
+    assert.equal(publicDoctor.doctorProfile.fullName, 'Dr. Reem Osman Updated');
+    assert.equal(Object.hasOwn(publicDoctor, 'password'), false);
+
     assert.equal((await request('assignment', { token: doctorTwo, method: 'POST', data: { patientId: firstId, status: 'accepted' } })).status, 400);
     assert.equal((await request('assignment', { token: doctorOne, method: 'POST', data: { patientId: firstId, status: 'accepted' } })).status, 200);
     assert.equal((await request('rating', { token: first, method: 'POST', data: { doctorId: 'DR-001', score: 5 } })).status, 200);

@@ -143,7 +143,11 @@ export async function doctorDirectory(db, visiblePatientId = '') {
   };
 }
 
-const assignmentJson = (row) => ({ patientId: row.patient_id, doctorId: row.doctor_id, status: row.status });
+const assignmentJson = (row) => ({
+  id: row.id, patientId: row.patient_id, doctorId: row.doctor_id, status: row.status,
+  requestedAt: row.requested_at?.toISOString?.() || row.requested_at,
+  respondedAt: row.responded_at?.toISOString?.() || row.responded_at || null,
+});
 
 export async function snapshot(db, user) {
   const directory = await doctorDirectory(db, user.role === 'patient' ? user.id : '');
@@ -185,32 +189,42 @@ export async function snapshot(db, user) {
   };
 }
 
+export async function requestDoctorInTransaction(db, patientId, doctorId) {
+  await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`care-request:${patientId}`]);
+  const doctor = await accountById(db, doctorId);
+  if (!doctor || doctor.role !== 'doctor') throw new ApiError(400, 'Choose an available doctor');
+  const existing = (await db.query(`SELECT * FROM care_assignments WHERE patient_id=$1 AND doctor_id=$2
+    AND status IN ('pending','accepted')`, [patientId, doctorId])).rows[0];
+  if (existing) return assignmentJson(existing);
+  const ended = await db.query(`UPDATE care_assignments SET status='ended', ended_at=now()
+    WHERE patient_id=$1 AND status IN ('pending','accepted') RETURNING id`, [patientId]);
+  if (ended.rows.length) await db.query(`UPDATE conversations SET status='ended', ended_at=now()
+    WHERE assignment_id=ANY($1::text[]) AND status='active'`, [ended.rows.map((row) => row.id)]);
+  const id = newId('assignment');
+  const row = (await db.query(`INSERT INTO care_assignments(id,patient_id,doctor_id,status)
+    VALUES($1,$2,$3,'pending') RETURNING *`, [id, patientId, doctorId])).rows[0];
+  await db.query('UPDATE patient_profiles SET selected_doctor_id=$2 WHERE user_id=$1', [patientId, doctorId]);
+  await audit(db, patientId, 'care_assignment.requested', 'care_assignment', id, { doctorId });
+  return assignmentJson(row);
+}
+
 export async function requestDoctor(pool, patientId, doctorId) {
-  return withTransaction(pool, async (db) => {
-    const doctor = await accountById(db, doctorId);
-    if (!doctor || doctor.role !== 'doctor') throw new ApiError(400, 'Choose an available doctor');
-    const existing = (await db.query(`SELECT * FROM care_assignments WHERE patient_id=$1 AND doctor_id=$2
-      AND status IN ('pending','accepted')`, [patientId, doctorId])).rows[0];
-    if (existing) return assignmentJson(existing);
-    const ended = await db.query(`UPDATE care_assignments SET status='ended', ended_at=now()
-      WHERE patient_id=$1 AND status IN ('pending','accepted') RETURNING id`, [patientId]);
-    if (ended.rows.length) await db.query(`UPDATE conversations SET status='ended', ended_at=now()
-      WHERE assignment_id=ANY($1::text[]) AND status='active'`, [ended.rows.map((row) => row.id)]);
-    const id = newId('assignment');
-    const row = (await db.query(`INSERT INTO care_assignments(id,patient_id,doctor_id,status)
-      VALUES($1,$2,$3,'pending') RETURNING *`, [id, patientId, doctorId])).rows[0];
-    await db.query('UPDATE patient_profiles SET selected_doctor_id=$2 WHERE user_id=$1', [patientId, doctorId]);
-    await audit(db, patientId, 'care_assignment.requested', 'care_assignment', id, { doctorId });
-    return assignmentJson(row);
-  });
+  return withTransaction(pool, (db) => requestDoctorInTransaction(db, patientId, doctorId));
 }
 
 export async function respondAssignment(pool, doctorId, patientId, status) {
   if (!['accepted', 'declined'].includes(status)) throw new ApiError(400, 'Invalid assignment');
   return withTransaction(pool, async (db) => {
+    await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`care-decision:${doctorId}:${patientId}`]);
     const row = (await db.query(`UPDATE care_assignments SET status=$3, responded_at=now()
       WHERE patient_id=$1 AND doctor_id=$2 AND status='pending' RETURNING *`, [patientId, doctorId, status])).rows[0];
-    if (!row) throw new ApiError(400, 'Invalid assignment');
+    if (!row) {
+      const latest = (await db.query(`SELECT * FROM care_assignments WHERE patient_id=$1 AND doctor_id=$2
+        ORDER BY requested_at DESC LIMIT 1`, [patientId, doctorId])).rows[0];
+      if (latest?.status === status) return assignmentJson(latest);
+      if (latest && ['accepted', 'declined'].includes(latest.status)) throw new ApiError(409, `Request was already ${latest.status}`);
+      throw new ApiError(400, 'No pending request is available');
+    }
     if (status === 'accepted') {
       await db.query(`INSERT INTO conversations(id,patient_id,doctor_id,assignment_id,status)
         VALUES($1,$2,$3,$4,'active') ON CONFLICT(assignment_id) DO NOTHING`, [newId('conversation'), patientId, doctorId, row.id]);

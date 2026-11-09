@@ -52,8 +52,9 @@ async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<
 }
 
 export async function bridgeAccount(account: Account) {
-  const result = await api<{ token: string }>('auth/bridge', 'POST', { account });
+  const result = await api<{ token: string; account: Omit<Account, 'password'>; assignment?: CareAssignment | null }>('auth/bridge', 'POST', { account });
   sessionStorage.setItem('ddt.sync.token', result.token);
+  return result;
 }
 
 export async function loginAccount(email: string, password: string, role: 'patient' | 'doctor') {
@@ -63,10 +64,12 @@ export async function loginAccount(email: string, password: string, role: 'patie
 }
 
 export const getSnapshot = () => api<SyncSnapshot>('snapshot');
+export const updateAccountProfile = (account: Account) => api<{ account: Omit<Account, 'password'> }>('profile', 'PUT', { profile: account.patientProfile || account.doctorProfile });
+export const requestCareDoctor = (doctorId: string) => api<{ assignment: CareAssignment }>('patient/doctor-request', 'POST', { doctorId });
 export const syncItem = (kind: 'food' | 'bolus' | 'glucose' | 'messages', item: unknown) =>
   api<{ ok: boolean }>(kind, 'POST', withoutLocalSyncMetadata(item));
 export const updateMeal = (id: string, update: unknown) => api<{ ok: boolean; meal: FoodEntry }>(`food/${encodeURIComponent(id)}`, 'PATCH', update);
-export const syncAssignment = (patientId: string, status: 'accepted' | 'declined') => api('assignment', 'POST', { patientId, status });
+export const syncAssignment = (patientId: string, status: 'accepted' | 'declined') => api<{ assignment: CareAssignment }>('assignment', 'POST', { patientId, status });
 export const syncRating = (doctorId: string, score: number) => api<{ ratings: DoctorRating[] }>('rating', 'POST', { doctorId, score });
 export const getEmergencyContacts = () => api<{ contacts: EmergencyContact[] }>('emergency-contacts');
 export const createEmergencyContact = (contact: Omit<EmergencyContact, 'id'>) => api<{ contact: EmergencyContact }>('emergency-contacts', 'POST', contact);

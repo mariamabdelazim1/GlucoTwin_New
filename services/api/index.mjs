@@ -8,7 +8,7 @@ import { ApiError, passwordHash, validPassword } from './lib.mjs';
 import {
   accountByEmail, accountById, addMessage, addPatientRecord, audit, createEmergencyContact,
   deleteEmergencyContact, doctorDirectory, emergencyContacts, publicAccount, rateDoctor,
-  requestDoctor, respondAssignment, snapshot, updateEmergencyContact, updateMeal, updateProfile,
+  requestDoctor, requestDoctorInTransaction, respondAssignment, snapshot, updateEmergencyContact, updateMeal, updateProfile,
 } from './store.mjs';
 
 const serviceDirectory = dirname(fileURLToPath(import.meta.url));
@@ -82,19 +82,30 @@ const server = createServer(async (req, res) => {
       if (!byEmail && account.role === 'doctor') throw new ApiError(403, 'Doctor accounts must be provisioned by an authorized administrator');
       if (!byEmail && account.password.length < 8) throw new ApiError(400, 'Password must be at least 8 characters');
       if (byEmail && (byEmail.id !== account.id || byEmail.role !== account.role || !validPassword(account.password, byEmail.password_hash))) throw new ApiError(401, 'Account mismatch');
+      let initialAssignment = null;
       if (!byEmail) {
         await withTransaction(pool, async (db) => {
+          if (account.role === 'patient' && account.patientProfile?.selectedDoctorId) {
+            const doctor = await accountById(db, account.patientProfile.selectedDoctorId);
+            if (!doctor || doctor.role !== 'doctor') throw new ApiError(400, 'Choose an available doctor');
+          }
           await db.query('INSERT INTO users(id,role,email,password_hash) VALUES($1,$2,$3,$4)', [account.id, account.role, account.email.toLowerCase(), passwordHash(account.password)]);
           await updateProfile(db, account.id, account.role, account.patientProfile || account.doctorProfile);
           await audit(db, account.id, 'account.created', 'user', account.id, { role: account.role });
+          if (account.role === 'patient' && account.patientProfile?.selectedDoctorId) {
+            initialAssignment = await requestDoctorInTransaction(db, account.id, account.patientProfile.selectedDoctorId);
+          }
         });
       } else await withTransaction(pool, async (db) => {
+        const profile = account.patientProfile || account.doctorProfile || {};
+        if (byEmail.role === 'patient' && profile.selectedDoctorId && profile.selectedDoctorId !== byEmail.selected_doctor_id) {
+          throw new ApiError(400, 'Use the doctor request action to change doctors');
+        }
         await updateProfile(db, byEmail.id, byEmail.role, account.patientProfile || account.doctorProfile);
         await audit(db, byEmail.id, 'profile.updated', `${byEmail.role}_profile`, byEmail.id);
       });
-      if (account.role === 'patient' && account.patientProfile?.selectedDoctorId) await requestDoctor(pool, account.id, account.patientProfile.selectedDoctorId);
       const stored = await accountById(pool, account.id);
-      return reply(res, 200, { token: makeToken(stored), account: publicAccount(stored) });
+      return reply(res, 200, { token: makeToken(stored), account: publicAccount(stored), assignment: initialAssignment });
     }
 
     if (req.method === 'POST' && path === '/api/auth/login') {
@@ -107,6 +118,20 @@ const server = createServer(async (req, res) => {
 
     const user = await authenticate(req);
     if (!user) throw new ApiError(401, 'Sign in required');
+
+    if (req.method === 'PUT' && path === '/api/profile') {
+      const input = await readBody(req);
+      const current = await accountById(pool, user.id);
+      const profile = input.profile || {};
+      if (user.role === 'patient' && profile.selectedDoctorId && profile.selectedDoctorId !== current.selected_doctor_id) {
+        throw new ApiError(400, 'Use the doctor request action to change doctors');
+      }
+      await withTransaction(pool, async (db) => {
+        await updateProfile(db, user.id, user.role, profile);
+        await audit(db, user.id, 'profile.updated', `${user.role}_profile`, user.id);
+      });
+      return reply(res, 200, { account: publicAccount(await accountById(pool, user.id)) });
+    }
 
     if (req.method === 'GET' && path === '/api/snapshot') {
       const result = await snapshot(pool, user);

@@ -25,22 +25,29 @@ import { patients } from './data/patients';
 import { initialMessages } from './data/messages';
 import { bolusHistory, foodLog } from './data/cgm';
 import { useStoredState } from './utils/storage';
-import { bridgeAccount, getSnapshot, loginAccount, mergeById, SyncApiError, syncAssignment, syncItem, syncRating } from './utils/sync';
+import { bridgeAccount, getSnapshot, loginAccount, mergeById, requestCareDoctor, SyncApiError, syncAssignment, syncItem, syncRating, updateAccountProfile } from './utils/sync';
 import type { GlucoseEntry } from './utils/sync';
 import { retryDecision } from './utils/syncState';
+import { mergePublicDoctors } from './utils/accountState';
+import { AssignmentDecisionError, confirmAssignmentDecision } from './utils/assignmentState';
 
 type Session = { id: string; role: Role };
+type AssignmentAction = { state: 'pending' | 'success' | 'error'; message: string };
+const assignmentKey = (patientId: string, doctorId: string) => `${doctorId}:${patientId}`;
 
 function RoleOnly({ role, allowed, children }: { role: Role; allowed: Role[]; children: ReactNode }) {
   const fallback = role === 'patient' ? '/patient/dashboard' : role === 'admin' ? '/admin' : '/dashboard';
   return allowed.includes(role) ? <>{children}</> : <Navigate to={fallback} replace />;
 }
 
-function Shell({ session, account, accounts, assignments, ratings, setRatings, allPatients, patientProfiles, messages, setMessages, foodEntries, setFoodEntries, bolusEntries, setBolusEntries, glucoseEntries, setGlucoseEntries, syncError, setAssignments, onUpdateAccount, onSignOut }: {
+function Shell({ session, account, accounts, assignments, assignmentActions, onAssignmentDecision, onRequestDoctor, ratings, setRatings, allPatients, patientProfiles, messages, setMessages, foodEntries, setFoodEntries, bolusEntries, setBolusEntries, glucoseEntries, setGlucoseEntries, syncError, onUpdateAccount, onSignOut, directoryError }: {
   session: Session;
   account?: Account;
   accounts: Account[];
   assignments: CareAssignment[];
+  assignmentActions: Record<string, AssignmentAction>;
+  onAssignmentDecision: (patientId: string, status: 'accepted' | 'declined') => Promise<void>;
+  onRequestDoctor: (doctorId: string) => Promise<string | null>;
   ratings: DoctorRating[];
   setRatings: Dispatch<SetStateAction<DoctorRating[]>>;
   allPatients: Patient[];
@@ -54,9 +61,9 @@ function Shell({ session, account, accounts, assignments, ratings, setRatings, a
   glucoseEntries: GlucoseEntry[];
   setGlucoseEntries: Dispatch<SetStateAction<GlucoseEntry[]>>;
   syncError: string | null;
-  setAssignments: Dispatch<SetStateAction<CareAssignment[]>>;
-  onUpdateAccount: (account: Account) => void;
+  onUpdateAccount: (account: Account) => Promise<string | null>;
   onSignOut: () => void;
+  directoryError: string | null;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -72,20 +79,16 @@ function Shell({ session, account, accounts, assignments, ratings, setRatings, a
   const currentAssignment = assignments.find((item) => item.patientId === account?.id && item.doctorId === account?.patientProfile?.selectedDoctorId);
   const selectedDoctor = accounts.find((item) => item.id === account?.patientProfile?.selectedDoctorId);
   const doctorName = selectedDoctor?.doctorProfile?.fullName || 'your doctor';
-  const changeAssignment = (patientId: string, status: CareAssignment['status']) => {
-    setAssignments((current) => current.map((item) => item.patientId === patientId && item.doctorId === session.id ? { ...item, status } : item));
-    if (status !== 'pending') void syncAssignment(patientId, status).catch(console.error);
-  };
 
   return <div className="min-h-screen bg-clinical-bg text-clinical-text lg:flex">
     <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
     <div className="min-w-0 flex-1">
       <TopHeader title={title} role={role} account={account} />
-      <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6">{syncError && role !== 'admin' ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{syncError}</div> : null}<Routes>
-        <Route path="/dashboard" element={<RoleOnly role={role} allowed={['doctor']}><Dashboard doctorId={session.id} doctorName={account?.doctorProfile?.fullName || 'Doctor'} patientRecords={allPatients} foodEntries={foodEntries} bolusEntries={bolusEntries} messages={messages} acceptedPatientSlugs={acceptedPatientSlugs} patientRequests={patientRequests} onAcceptPatient={(id) => changeAssignment(id, 'accepted')} onDeclinePatient={(id) => changeAssignment(id, 'declined')} /></RoleOnly>} />
+      <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6">{syncError && role !== 'admin' ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{syncError}</div> : null}{directoryError ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{directoryError}</div> : null}<Routes>
+        <Route path="/dashboard" element={<RoleOnly role={role} allowed={['doctor']}><Dashboard doctorId={session.id} doctorName={account?.doctorProfile?.fullName || 'Doctor'} patientRecords={allPatients} foodEntries={foodEntries} bolusEntries={bolusEntries} messages={messages} acceptedPatientSlugs={acceptedPatientSlugs} patientRequests={patientRequests} assignmentActions={assignmentActions} onAcceptPatient={(id) => onAssignmentDecision(id, 'accepted')} onDeclinePatient={(id) => onAssignmentDecision(id, 'declined')} /></RoleOnly>} />
         <Route path="/patient/dashboard" element={<RoleOnly role={role} allowed={['patient']}>{currentPatient && account?.patientProfile ? <PatientDashboard patient={currentPatient} doctorName={doctorName} assignmentStatus={currentAssignment?.status || 'pending'} setMessages={setMessages} foodEntries={foodEntries} setFoodEntries={setFoodEntries} bolusEntries={bolusEntries} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} patientProfile={account.patientProfile} /> : null}</RoleOnly>} />
         <Route path="/patient/food" element={<RoleOnly role={role} allowed={['patient']}>{currentPatient && account?.patientProfile ? <PatientDashboard focusFood patient={currentPatient} doctorName={doctorName} assignmentStatus={currentAssignment?.status || 'pending'} setMessages={setMessages} foodEntries={foodEntries} setFoodEntries={setFoodEntries} bolusEntries={bolusEntries} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} patientProfile={account.patientProfile} /> : null}</RoleOnly>} />
-        <Route path="/patient/doctors" element={<RoleOnly role={role} allowed={['patient']}><Doctors accounts={accounts} ratings={ratings} patientAccount={account} assignmentStatus={currentAssignment?.status} onChoose={(doctorId) => { if (account?.patientProfile && doctorId !== account.patientProfile.selectedDoctorId) onUpdateAccount({ ...account, patientProfile: { ...account.patientProfile, selectedDoctorId: doctorId } }); }} onRate={(score) => {
+        <Route path="/patient/doctors" element={<RoleOnly role={role} allowed={['patient']}><Doctors accounts={accounts} ratings={ratings} patientAccount={account} assignmentStatus={currentAssignment?.status} onChoose={onRequestDoctor} onRate={(score) => {
           if (!account?.patientProfile) return;
           const patientId = account.id;
           const doctorId = account.patientProfile.selectedDoctorId;
@@ -117,7 +120,10 @@ export default function App() {
   const [bolusEntries, setBolusEntries] = useStoredState('ddt.bolus.v1', bolusHistory);
   const [glucoseEntries, setGlucoseEntries] = useStoredState<GlucoseEntry[]>('ddt.glucose.v1', []);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [assignmentActions, setAssignmentActions] = useState<Record<string, AssignmentAction>>({});
   const inFlight = useRef(new Set<string>());
+  const assignmentInFlight = useRef(new Set<string>());
   const [session, setSession] = useState<Session | null>(() => {
     try { return JSON.parse(sessionStorage.getItem('ddt.session.v1') || 'null') as Session | null; } catch { return null; }
   });
@@ -150,7 +156,10 @@ export default function App() {
         });
         setAssignments((current) => {
           const others = current.filter((item) => session.role === 'patient' ? item.patientId !== session.id : item.doctorId !== session.id);
-          const next = [...others, ...snapshot.assignments];
+          const scoped = current.filter((item) => session.role === 'patient' ? item.patientId === session.id : item.doctorId === session.id);
+          const preserved = scoped.filter((item) => assignmentInFlight.current.has(assignmentKey(item.patientId, item.doctorId)));
+          const remote = snapshot.assignments.filter((item) => !assignmentInFlight.current.has(assignmentKey(item.patientId, item.doctorId)));
+          const next = [...others, ...preserved, ...remote];
           return JSON.stringify(next) === JSON.stringify(current) ? current : next;
         });
         setFoodEntries((current) => mergeById(current, snapshot.food));
@@ -223,28 +232,15 @@ export default function App() {
     const refreshDoctors = async () => {
       try {
         const response = await fetch('/api/doctors');
-        if (!response.ok) return;
-        let result = await response.json() as { doctors: Omit<Account, 'password'>[]; ratings: DoctorRating[] };
-        const remoteIds = new Set(result.doctors.map((doctor) => doctor.id));
-        const localDoctors = accounts.filter((item) => item.role === 'doctor' && item.password && !remoteIds.has(item.id));
-        for (const doctor of localDoctors) {
-          const migrated = await fetch('/api/auth/bridge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: doctor }) });
-          if (!migrated.ok) console.warn(`Could not sync doctor profile ${doctor.id}`);
-        }
-        if (localDoctors.length) {
-          const updated = await fetch('/api/doctors');
-          if (updated.ok) result = await updated.json() as { doctors: Omit<Account, 'password'>[]; ratings: DoctorRating[] };
-        }
+        if (!response.ok) throw new Error('Doctor directory request failed');
+        const result = await response.json() as { doctors: Omit<Account, 'password'>[]; ratings: DoctorRating[] };
         setRatings(result.ratings);
-        setAccounts((current) => {
-          const ids = new Set(current.map((item) => item.id));
-          const missing = result.doctors.filter((item) => !ids.has(item.id)).map((item) => ({ ...item, password: '' } as Account));
-          return missing.length ? [...current, ...missing] : current;
-        });
-      } catch { /* The public directory can still show locally available doctors. */ }
+        setAccounts((current) => mergePublicDoctors(current, result.doctors));
+        setDirectoryError(null);
+      } catch { setDirectoryError('The live doctor directory is unavailable. Showing saved profile information.'); }
     };
     void refreshDoctors();
-  }, [accounts, setAccounts, setRatings]);
+  }, [setAccounts, setRatings]);
   useEffect(() => {
     if (messages.some((message) => !message.doctorId)) {
       setMessages((current) => current.map((message) => message.doctorId ? message : { ...message, doctorId: accounts.find((item) => item.id === message.patientSlug)?.patientProfile?.selectedDoctorId || 'DR-001' }));
@@ -263,6 +259,51 @@ export default function App() {
     ? durableSyncIssue.syncState === 'conflict' ? 'A local entry conflicts with a server record and will not be retried automatically.' : 'A local entry remains saved on this device because it could not be uploaded.'
     : syncError;
   const home = session?.role === 'patient' ? '/patient/dashboard' : session?.role === 'admin' ? '/admin' : '/dashboard';
+  const applyConfirmedAssignment = (confirmed: CareAssignment) => {
+    setAssignments((current) => [confirmed, ...current.filter((item) => {
+      if (confirmed.id && item.id === confirmed.id) return false;
+      return !(item.patientId === confirmed.patientId && item.doctorId === confirmed.doctorId && item.status === 'pending');
+    })]);
+  };
+  const decideAssignment = async (patientId: string, status: 'accepted' | 'declined') => {
+    if (!session || session.role !== 'doctor') return;
+    const key = assignmentKey(patientId, session.id);
+    if (assignmentInFlight.current.has(key)) return;
+    assignmentInFlight.current.add(key);
+    setAssignmentActions((current) => ({ ...current, [key]: { state: 'pending', message: `${status === 'accepted' ? 'Accepting' : 'Declining'} request…` } }));
+    try {
+      const result = await confirmAssignmentDecision(patientId, session.id, status,
+        () => syncAssignment(patientId, status), async () => (await getSnapshot()).assignments);
+      applyConfirmedAssignment(result.assignment);
+      setAssignmentActions((current) => ({ ...current, [key]: { state: 'success', message: result.reconciled ? `Request ${status}; the server confirmed the decision after the response was lost.` : `Request ${status}.` } }));
+    } catch (decisionError) {
+      if (decisionError instanceof AssignmentDecisionError && decisionError.assignments) {
+        setAssignments((current) => [...current.filter((item) => item.doctorId !== session.id), ...decisionError.assignments!]);
+      }
+      setAssignmentActions((current) => ({ ...current, [key]: { state: 'error', message: decisionError instanceof Error ? decisionError.message : 'Decision failed.' } }));
+    } finally {
+      assignmentInFlight.current.delete(key);
+    }
+  };
+  const chooseDoctor = async (doctorId: string) => {
+    if (!session || session.role !== 'patient' || !account?.patientProfile) return 'Patient access required.';
+    const current = assignments.find((item) => item.patientId === session.id && item.doctorId === doctorId);
+    if (doctorId === account.patientProfile.selectedDoctorId && current && current.status !== 'declined') {
+      return current.status === 'accepted' ? 'This doctor is already connected.' : 'A request is already pending.';
+    }
+    try {
+      const result = await requestCareDoctor(doctorId);
+      setAssignments((items) => [result.assignment, ...items.filter((item) => {
+        if (result.assignment.id && item.id === result.assignment.id) return false;
+        if (item.patientId !== session.id) return true;
+        if (item.status === 'declined') return true;
+        return false;
+      })]);
+      setAccounts((items) => items.map((item) => item.id === session.id && item.patientProfile
+        ? { ...item, patientProfile: { ...item.patientProfile, selectedDoctorId: doctorId } } : item));
+      return null;
+    } catch (error) { return error instanceof Error ? error.message : 'Could not send the doctor request.'; }
+  };
   const signIn = async (identifier: string, password: string, mode: 'doctor' | 'patient') => {
     if (identifier.toLowerCase() === 'admin') {
       if (password !== 'admin123') return 'Incorrect email or password.';
@@ -271,8 +312,11 @@ export default function App() {
     }
     const found = accounts.find((item) => item.email.toLowerCase() === identifier.toLowerCase() && item.role === mode && item.password === password);
     if (found) {
-      try { await bridgeAccount(found); } catch { return 'Sync service is unavailable. Start PostgreSQL and run npm run dev:api.'; }
-      setSession({ id: found.id, role: found.role });
+      try {
+        const remote = await loginAccount(found.email, password, mode);
+        setAccounts((current) => current.map((item) => item.id === remote.id ? { ...remote, password } as Account : item));
+        setSession({ id: remote.id, role: remote.role });
+      } catch { return 'Incorrect email or password, or sync service unavailable.'; }
       return null;
     }
     try {
@@ -284,27 +328,29 @@ export default function App() {
   };
   const register = async (newAccount: Account) => {
     if (newAccount.email.toLowerCase() === 'admin' || accounts.some((item) => item.email.toLowerCase() === newAccount.email.toLowerCase())) return 'An account with this email already exists.';
-    try { await bridgeAccount(newAccount); } catch { return 'Sync service is unavailable. Start PostgreSQL and run npm run dev:api.'; }
-    setAccounts((current) => [...current, newAccount]);
-    if (newAccount.patientProfile) setAssignments((current) => [...current, { patientId: newAccount.id, doctorId: newAccount.patientProfile!.selectedDoctorId, status: 'pending' }]);
-    setSession({ id: newAccount.id, role: newAccount.role });
+    try {
+      const created = await bridgeAccount(newAccount);
+      setAccounts((current) => [...current, { ...created.account, password: newAccount.password } as Account]);
+      if (created.assignment) setAssignments((current) => [created.assignment!, ...current]);
+      setSession({ id: created.account.id, role: created.account.role });
+    } catch { return 'Sync service is unavailable. Start PostgreSQL and run npm run dev:api.'; }
     return null;
   };
   const loginProps = { accounts, ratings, onSignIn: signIn, onRegister: register };
   return <Routes>
     <Route path="/" element={session ? <Navigate to={home} replace /> : <Landing />} />
-    <Route path="/doctors" element={session?.role === 'patient' ? <Navigate to="/patient/doctors" replace /> : <Doctors publicView accounts={accounts} ratings={ratings} />} />
+    <Route path="/doctors" element={session?.role === 'patient' ? <Navigate to="/patient/doctors" replace /> : <Doctors publicView accounts={accounts} ratings={ratings} error={directoryError} />} />
     <Route path="/mobile-preview" element={session?.role === 'doctor' || session?.role === 'admin' ? <Navigate to={home} replace /> : <MobilePreview existingPatient={account?.role === 'patient' ? account : undefined} />} />
     <Route path="/login" element={session ? <Navigate to={home} replace /> : <Login {...loginProps} />} />
     <Route path="/login/doctor" element={session ? <Navigate to={home} replace /> : <Login mode="doctor" {...loginProps} />} />
     <Route path="/login/patient" element={session ? <Navigate to={home} replace /> : <Login mode="patient" {...loginProps} />} />
     <Route path="/login/admin" element={<Navigate to="/login" replace />} />
-    <Route path="/*" element={session && (session.role === 'admin' || account) ? <Shell session={session} account={account} accounts={accounts} assignments={assignments} ratings={ratings} setRatings={setRatings} allPatients={allPatients} patientProfiles={patientProfiles} messages={visibleMessages} setMessages={setMessages} foodEntries={visibleFood} setFoodEntries={setFoodEntries} bolusEntries={visibleBolus} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} syncError={displayedSyncError} setAssignments={setAssignments} onUpdateAccount={(updated) => {
-      if (updated.patientProfile && updated.patientProfile.selectedDoctorId !== account?.patientProfile?.selectedDoctorId) {
-        setAssignments((current) => [...current.filter((item) => item.patientId !== updated.id), { patientId: updated.id, doctorId: updated.patientProfile!.selectedDoctorId, status: 'pending' }]);
-      }
-      setAccounts((current) => current.map((item) => item.id === updated.id ? updated : item));
-      void bridgeAccount(updated).catch(console.error);
+    <Route path="/*" element={session && (session.role === 'admin' || account) ? <Shell session={session} account={account} accounts={accounts} assignments={assignments} assignmentActions={assignmentActions} onAssignmentDecision={decideAssignment} onRequestDoctor={chooseDoctor} ratings={ratings} setRatings={setRatings} allPatients={allPatients} patientProfiles={patientProfiles} messages={visibleMessages} setMessages={setMessages} foodEntries={visibleFood} setFoodEntries={setFoodEntries} bolusEntries={visibleBolus} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} syncError={displayedSyncError} directoryError={directoryError} onUpdateAccount={async (updated) => {
+      try {
+        const result = await updateAccountProfile(updated);
+        setAccounts((current) => current.map((item) => item.id === updated.id ? { ...result.account, password: item.password } as Account : item));
+        return null;
+      } catch (error) { return error instanceof Error ? error.message : 'Could not save the profile.'; }
     }} onSignOut={() => { sessionStorage.removeItem('ddt.sync.token'); setSession(null); }} /> : <Navigate to="/login" replace />} />
   </Routes>;
 }

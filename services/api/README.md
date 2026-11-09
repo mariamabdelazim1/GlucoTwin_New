@@ -160,6 +160,15 @@ only the explicitly documented demo IDs use the fixed synthetic fixture date and
 
 The current one-doctor workflow is preserved. Requesting a different doctor ends the former active assignment and conversation before creating the new pending assignment. Records are retained for history, but the snapshot API exposes messages only from the current active conversation. Therefore a newly assigned doctor cannot see a former doctor's conversation, and the former doctor loses snapshot access after reassignment. A future audited history endpoint can expose retained conversations under a separately approved policy.
 
+Account authentication and profile synchronization do not create care requests. A new
+patient registration may create its initial pending request atomically when it includes
+an explicitly selected doctor. Later doctor changes and same-doctor retries after a
+decline use `POST /api/patient/doctor-request`; ordinary profile edits use
+`PUT /api/profile`. Existing pending or accepted requests remain idempotent, while
+declined and ended assignments remain in history. Assignment responses now include an
+`id` plus request/response timestamps in addition to the existing patient, doctor, and
+status fields.
+
 ## Compatibility and limitations
 
 Existing `/api` response shapes are retained for the React and Flutter clients. Snapshots additionally return normalized meal status, planned/actual times, announced/consumed carbohydrates, and version; normalized columns override stale values in `legacy_payload`.
@@ -208,6 +217,7 @@ Local verification from the repository root:
 ```bash
 npm run test:api                 # requires dedicated TEST_DATABASE_URL
 npm --workspace apps/web test
+npm --workspace apps/web run test:journeys
 npm run test:web:integration     # simulated DOM + live API; requires TEST_DATABASE_URL with _test in its database name
 npm run build:web
 cd apps/mobile
