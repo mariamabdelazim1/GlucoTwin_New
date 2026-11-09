@@ -70,6 +70,46 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     };
     const first = await register(firstId);
     const second = await register(secondId);
+    const bridgeProfile = async (account, password = 'test-password') => request('auth/bridge', {
+      method: 'POST', data: { account: { ...account, password } },
+    });
+    let roundTripAccount = (await request('snapshot', { token: first })).body.account;
+    assert.equal(roundTripAccount.patientProfile.diagnosisYear, '');
+    for (let pass = 0; pass < 2; pass++) {
+      const roundTrip = await bridgeProfile(roundTripAccount);
+      assert.equal(roundTrip.status, 200, JSON.stringify(roundTrip.body));
+      roundTripAccount = roundTrip.body.account;
+      assert.equal(roundTripAccount.patientProfile.diagnosisYear, '');
+    }
+    let profileUpdate = await bridgeProfile({ ...roundTripAccount, patientProfile: {
+      ...roundTripAccount.patientProfile, age: ' ', weight: '', height: '\t', diagnosisYear: '',
+    } });
+    assert.equal(profileUpdate.status, 200, JSON.stringify(profileUpdate.body));
+    assert.deepEqual((await db.query('SELECT age_years,weight_kg,height_cm,diagnosis_year FROM patient_profiles WHERE user_id=$1', [firstId])).rows[0], {
+      age_years: null, weight_kg: null, height_cm: null, diagnosis_year: null,
+    });
+    profileUpdate = await bridgeProfile({ ...profileUpdate.body.account, patientProfile: {
+      ...profileUpdate.body.account.patientProfile, age: '0', weight: 0, height: '0', diagnosisYear: 0,
+    } });
+    assert.equal(profileUpdate.status, 200, JSON.stringify(profileUpdate.body));
+    assert.deepEqual((await db.query('SELECT age_years,weight_kg,height_cm,diagnosis_year FROM patient_profiles WHERE user_id=$1', [firstId])).rows[0], {
+      age_years: 0, weight_kg: '0', height_cm: '0', diagnosis_year: 0,
+    });
+    profileUpdate = await bridgeProfile({ ...profileUpdate.body.account, patientProfile: {
+      ...profileUpdate.body.account.patientProfile, age: '31', weight: '71', height: '171', diagnosisYear: '2010',
+    } });
+    assert.equal(profileUpdate.status, 200, JSON.stringify(profileUpdate.body));
+    const { age: omittedAge, weight: omittedWeight, height: omittedHeight, diagnosisYear: omittedDiagnosisYear, ...profileWithoutNumbers } = profileUpdate.body.account.patientProfile;
+    void omittedAge; void omittedWeight; void omittedHeight; void omittedDiagnosisYear;
+    profileUpdate = await bridgeProfile({ ...profileUpdate.body.account, patientProfile: profileWithoutNumbers });
+    assert.equal(profileUpdate.status, 200, JSON.stringify(profileUpdate.body));
+    assert.deepEqual((await db.query('SELECT age_years,weight_kg,height_cm,diagnosis_year FROM patient_profiles WHERE user_id=$1', [firstId])).rows[0], {
+      age_years: 31, weight_kg: '71', height_cm: '171', diagnosis_year: 2010,
+    });
+    for (const [field, invalid] of [['age', -1], ['weight', false], ['height', 'bad'], ['diagnosisYear', 'Infinity']]) {
+      const invalidProfile = await bridgeProfile({ ...profileUpdate.body.account, patientProfile: { ...profileUpdate.body.account.patientProfile, [field]: invalid } });
+      assert.equal(invalidProfile.status, 400, `accepted invalid profile ${field}`);
+    }
     const forbiddenDoctor = await request('auth/bridge', { method: 'POST', data: { account: {
       id: `doctor-${runId}`, role: 'doctor', email: `doctor-${runId}@example.test`, password: 'test-password', doctorProfile: { fullName: 'Unprovisioned Doctor' },
     } } });
@@ -80,6 +120,21 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(collidingId.status, 409);
     const doctorOne = await login('sarah.ahmed@clinic.example', 'password', 'doctor');
     const doctorTwo = await login('khaled.mansour@clinic.example', 'password', 'doctor');
+    const doctorAccount = (await request('auth/login', { method: 'POST', data: { email: 'reem.osman@clinic.example', password: 'password', role: 'doctor' } })).body.account;
+    let doctorProfileUpdate = await bridgeProfile({ ...doctorAccount, doctorProfile: { ...doctorAccount.doctorProfile, yearsExperience: ' ' } }, 'password');
+    assert.equal(doctorProfileUpdate.status, 200, JSON.stringify(doctorProfileUpdate.body));
+    assert.equal((await db.query("SELECT years_experience FROM doctor_profiles WHERE user_id='DR-003'")).rows[0].years_experience, null);
+    doctorProfileUpdate = await bridgeProfile({ ...doctorProfileUpdate.body.account, doctorProfile: { ...doctorProfileUpdate.body.account.doctorProfile, yearsExperience: 0 } }, 'password');
+    assert.equal(doctorProfileUpdate.status, 200);
+    assert.equal((await db.query("SELECT years_experience FROM doctor_profiles WHERE user_id='DR-003'")).rows[0].years_experience, 0);
+    doctorProfileUpdate = await bridgeProfile({ ...doctorProfileUpdate.body.account, doctorProfile: { ...doctorProfileUpdate.body.account.doctorProfile, yearsExperience: 10 } }, 'password');
+    assert.equal(doctorProfileUpdate.status, 200, JSON.stringify(doctorProfileUpdate.body));
+    const { yearsExperience: omittedExperience, ...doctorWithoutExperience } = doctorProfileUpdate.body.account.doctorProfile;
+    void omittedExperience;
+    doctorProfileUpdate = await bridgeProfile({ ...doctorProfileUpdate.body.account, doctorProfile: doctorWithoutExperience }, 'password');
+    assert.equal(doctorProfileUpdate.status, 200);
+    assert.equal((await db.query("SELECT years_experience FROM doctor_profiles WHERE user_id='DR-003'")).rows[0].years_experience, 10);
+    assert.equal((await bridgeProfile({ ...doctorProfileUpdate.body.account, doctorProfile: { ...doctorProfileUpdate.body.account.doctorProfile, yearsExperience: false } }, 'password')).status, 400);
     assert.equal((await request('assignment', { token: doctorTwo, method: 'POST', data: { patientId: firstId, status: 'accepted' } })).status, 400);
     assert.equal((await request('assignment', { token: doctorOne, method: 'POST', data: { patientId: firstId, status: 'accepted' } })).status, 200);
     assert.equal((await request('rating', { token: first, method: 'POST', data: { doctorId: 'DR-001', score: 5 } })).status, 200);
@@ -145,6 +200,12 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
       assert.equal(invalidResult.status, 400, `accepted invalid numeric ${String(invalid)}`);
     }
     assert.equal((await request('glucose', { token: first, method: 'POST', data: {
+      id: `blank-glucose-${runId}`, patientSlug: firstId, value: ' ', recordedAt: legacyTime,
+    } })).status, 400);
+    assert.equal((await request('bolus', { token: first, method: 'POST', data: {
+      id: `blank-bolus-${runId}`, patientSlug: firstId, recorded: ' ', administeredAt: legacyTime,
+    } })).status, 400);
+    assert.equal((await request('glucose', { token: first, method: 'POST', data: {
       id: `no-zone-${runId}`, patientSlug: firstId, value: 100, recordedAt: '2026-01-01T10:00:00',
     } })).status, 400);
     assert.equal((await request('bolus', { token: first, method: 'POST', data: {
@@ -194,12 +255,13 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     const directory = await mkdtemp(join(tmpdir(), 'glucotwin-import-'));
     const importId = `imported-${runId}`;
     const importMealId = `imported-meal-${runId}`;
+    const importRatingId = `imported-rating-${runId}`;
     const fixture = join(directory, 'data.json');
     await writeFile(fixture, JSON.stringify({
       accounts: [{ id: importId, role: 'patient', email: `${importId}@example.test`, passwordHash: passwordHash('import-password'), patientProfile: { fullName: 'Imported Patient' } }],
       assignments: [], food: [{ id: importMealId, patientSlug: importId, meal: 'Legacy meal', items: 'Unknown',
         carbs: '20g', status: 'Recorded', plannedEatingAt: '2026-06-01T12:00:00+02:00' }],
-      bolus: [], glucose: [], messages: [], ratings: [],
+      bolus: [], glucose: [], messages: [], ratings: [{ id: importRatingId, doctorId: 'DR-001', patientId: null, score: 4, source: 'imported' }],
     }));
     for (let pass = 0; pass < 2; pass++) {
       const imported = spawn(process.execPath, [importFile, fixture], { env: { ...process.env, DATABASE_URL: databaseUrl } });
@@ -211,6 +273,9 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assert.equal(importedMeal.actual_eating_at, null);
     assert.equal(importedMeal.consumed_carbs_g, null);
     assert.equal(importedMeal.confirmation_provenance.source, 'ambiguous_legacy_import_requires_review');
+    const importedRating = (await db.query('SELECT patient_id,source FROM doctor_ratings WHERE id=$1', [importRatingId])).rows[0];
+    assert.equal(importedRating.patient_id, null);
+    assert.equal(importedRating.source, 'imported');
   } finally {
     if (server) await stopServer(server);
     await db.end();

@@ -16,9 +16,9 @@ npm run dev:api
 ```
 
 `db:migrate` is also the upgrade command for an existing database. It records and skips
-`001_initial.sql`, then applies `002_repair_triggers_and_meals.sql`; do not reset or
+previously applied migrations, then applies `003_rating_patient_role.sql`; do not reset or
 recreate the database. For migration regression setup only, the runner supports
-`node scripts/migrate.mjs --test --through=001_initial.sql` against the dedicated
+`node scripts/migrate.mjs --test --through=002_repair_triggers_and_meals.sql` against the dedicated
 `TEST_DATABASE_URL`.
 
 `db:seed` is explicit, idempotent development data. Production startup never creates demo accounts or records. Change every example credential and `TOKEN_SECRET` outside local development.
@@ -57,6 +57,9 @@ Identity and care:
 - `patient_emergency_contacts` (partial unique index permits at most one primary contact per patient)
 - `care_assignments` with pending, accepted, declined, and ended history
 - `doctor_ratings`
+
+Patient-submitted ratings require a valid patient account. Demo and imported ratings may
+use a null `patient_id`; if they supply a non-null ID, it must still reference a patient.
 
 Communication:
 
@@ -129,6 +132,14 @@ Supplied numeric values accept finite nonnegative JSON numbers or plain decimal 
 The documented legacy unit strings `45g` and `2 U` are accepted by their respective
 fields. Booleans, blank strings, malformed strings, negatives, NaN, and infinity are
 rejected. Omitted optional values become SQL `NULL`; explicit zero remains zero.
+
+Profile form numbers use a deliberately narrower boundary rule: blank or whitespace-only
+optional values (`age`, `weight`, `height`, `diagnosisYear`, and `yearsExperience`) clear
+that value to SQL `NULL`, while zero remains zero and malformed, negative, boolean, or
+nonfinite input is rejected. Omitting one of these properties during a profile update
+preserves its stored value. Public account responses continue to represent unknown profile
+numbers as empty strings for client compatibility. These profile-only rules do not apply
+to glucose, carbohydrate, or insulin inputs, where blank values remain invalid.
 
 Older rows that may have had consumption inferred solely from a legacy `carbs` field
 are not rewritten automatically. Review them with a read-only query such as:

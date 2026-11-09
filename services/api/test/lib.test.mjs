@@ -13,6 +13,8 @@ test('strict numeric validation distinguishes missing, zero, and invalid input',
   }
   assert.equal(strictUnit('45g', 'g', 'Carbs'), 45);
   assert.equal(strictUnit('2 U', 'U', 'Insulin'), 2);
+  assert.throws(() => strictUnit(' ', 'g', 'Carbs'));
+  assert.throws(() => strictUnit('', 'U', 'Insulin'));
   assert.throws(() => strictUnit('2ish U', 'U', 'Insulin'));
 });
 

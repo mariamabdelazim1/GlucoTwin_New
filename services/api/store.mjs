@@ -63,6 +63,12 @@ export const mealJson = (row) => ({
   time: row.legacy_payload?.time || row.planned_eating_at.toISOString(),
 });
 
+function optionalProfileNumber(profile, field, label) {
+  const value = profile[field];
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return optionalNumber(value, label);
+}
+
 export async function updateProfile(db, userId, role, profile = {}) {
   if (role === 'patient') {
     await db.query(`INSERT INTO patient_profiles(
@@ -70,16 +76,22 @@ export async function updateProfile(db, userId, role, profile = {}) {
       diagnosis_year, medications, allergies, legacy_emergency_contact, selected_doctor_id
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (user_id) DO UPDATE SET
-      full_name=EXCLUDED.full_name, age_years=EXCLUDED.age_years, weight_kg=EXCLUDED.weight_kg,
-      height_cm=EXCLUDED.height_cm, diabetes_type=EXCLUDED.diabetes_type,
-      insulin_plan=EXCLUDED.insulin_plan, diagnosis_year=EXCLUDED.diagnosis_year,
+      full_name=EXCLUDED.full_name,
+      age_years=CASE WHEN $13 THEN EXCLUDED.age_years ELSE patient_profiles.age_years END,
+      weight_kg=CASE WHEN $14 THEN EXCLUDED.weight_kg ELSE patient_profiles.weight_kg END,
+      height_cm=CASE WHEN $15 THEN EXCLUDED.height_cm ELSE patient_profiles.height_cm END,
+      diabetes_type=EXCLUDED.diabetes_type,
+      insulin_plan=EXCLUDED.insulin_plan,
+      diagnosis_year=CASE WHEN $16 THEN EXCLUDED.diagnosis_year ELSE patient_profiles.diagnosis_year END,
       medications=EXCLUDED.medications, allergies=EXCLUDED.allergies,
       legacy_emergency_contact=EXCLUDED.legacy_emergency_contact,
       selected_doctor_id=COALESCE(EXCLUDED.selected_doctor_id, patient_profiles.selected_doctor_id)`, [
-      userId, profile.fullName || 'Patient', optionalNumber(profile.age, 'Age'), optionalNumber(profile.weight, 'Weight'),
-      optionalNumber(profile.height, 'Height'), profile.diabetesType || null, profile.insulinPlan || null,
-      optionalNumber(profile.diagnosisYear, 'Diagnosis year'), profile.medications || null, profile.allergies || null,
+      userId, profile.fullName || 'Patient', optionalProfileNumber(profile, 'age', 'Age'), optionalProfileNumber(profile, 'weight', 'Weight'),
+      optionalProfileNumber(profile, 'height', 'Height'), profile.diabetesType || null, profile.insulinPlan || null,
+      optionalProfileNumber(profile, 'diagnosisYear', 'Diagnosis year'), profile.medications || null, profile.allergies || null,
       profile.emergencyContact || null, profile.selectedDoctorId || null,
+      Object.hasOwn(profile, 'age'), Object.hasOwn(profile, 'weight'), Object.hasOwn(profile, 'height'),
+      Object.hasOwn(profile, 'diagnosisYear'),
     ]);
   } else {
     await db.query(`INSERT INTO doctor_profiles(
@@ -88,13 +100,15 @@ export async function updateProfile(db, userId, role, profile = {}) {
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     ON CONFLICT (user_id) DO UPDATE SET
       full_name=EXCLUDED.full_name, specialty=EXCLUDED.specialty,
-      years_experience=EXCLUDED.years_experience, medical_school=EXCLUDED.medical_school,
+      years_experience=CASE WHEN $12 THEN EXCLUDED.years_experience ELSE doctor_profiles.years_experience END,
+      medical_school=EXCLUDED.medical_school,
       qualifications=EXCLUDED.qualifications, bio=EXCLUDED.bio, certificates=EXCLUDED.certificates,
       papers=EXCLUDED.papers, photo=EXCLUDED.photo, documents=EXCLUDED.documents`, [
-      userId, profile.fullName || 'Doctor', profile.specialty || null, optionalNumber(profile.yearsExperience, 'Years of experience'),
+      userId, profile.fullName || 'Doctor', profile.specialty || null, optionalProfileNumber(profile, 'yearsExperience', 'Years of experience'),
       profile.medicalSchool || null, profile.qualifications || null, profile.bio || null,
       JSON.stringify(profile.certificates || []), JSON.stringify(profile.papers || []), profile.photo || null,
       JSON.stringify(profile.documents || []),
+      Object.hasOwn(profile, 'yearsExperience'),
     ]);
   }
 }

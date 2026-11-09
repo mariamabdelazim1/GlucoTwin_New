@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const connectionString = process.env.TEST_DATABASE_URL;
@@ -8,6 +10,16 @@ if (!connectionString || !new URL(connectionString).pathname.includes('_test')) 
   throw new Error('TEST_DATABASE_URL must point to a dedicated database whose name contains _test');
 }
 const migration = async (name) => readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8');
+const seedFile = fileURLToPath(new URL('../scripts/seed.mjs', import.meta.url));
+
+async function run(command, args, env) {
+  const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += chunk; });
+  child.stderr.on('data', (chunk) => { output += chunk; });
+  const code = await new Promise((resolve) => child.once('exit', resolve));
+  assert.equal(code, 0, output);
+}
 
 async function inSchema(label, callback) {
   const client = new pg.Client({ connectionString });
@@ -16,7 +28,7 @@ async function inSchema(label, callback) {
   try {
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}", public`);
-    await callback(client);
+    await callback(client, schema);
   } finally {
     await client.query('SET search_path TO public');
     await client.query(`DROP SCHEMA "${schema}" CASCADE`);
@@ -46,6 +58,11 @@ async function exerciseTriggers(db) {
   await db.query("UPDATE recommendations SET suggested_amount=2 WHERE id='rec'");
   await db.query("UPDATE recommendation_responses SET response='modified' WHERE id='resp'");
   await db.query("UPDATE care_assignments SET responded_at=now() WHERE id='assignment'");
+  await db.query("INSERT INTO doctor_ratings(id,doctor_id,patient_id,score,source) VALUES('demo-rating','d1',NULL,5,'demo')");
+  await db.query("INSERT INTO doctor_ratings(id,doctor_id,patient_id,score,source) VALUES('imported-rating','d1',NULL,4,'imported')");
+  await db.query("INSERT INTO doctor_ratings(id,doctor_id,patient_id,score,source) VALUES('patient-rating','d1','p1',5,'patient')");
+  await assert.rejects(db.query("INSERT INTO doctor_ratings(id,doctor_id,patient_id,score,source) VALUES('missing-patient','d1',NULL,5,'patient')"));
+  await assert.rejects(db.query("INSERT INTO doctor_ratings(id,doctor_id,patient_id,score,source) VALUES('doctor-as-patient','d1','d1',5,'imported')"));
   await assert.rejects(db.query("INSERT INTO glucose_readings(id,patient_id,measured_at,glucose_mg_dl,source) VALUES('bad-role','d1',now(),100,'manual')"));
   await assert.rejects(db.query("INSERT INTO patient_profiles(user_id,full_name) VALUES('d1','Not Patient')"));
   await assert.rejects(db.query("INSERT INTO care_assignments(id,patient_id,doctor_id,status) VALUES('bad-doctor','p1','p2','pending')"));
@@ -60,14 +77,32 @@ test('fresh database applies all migrations and trigger invariants permit real w
   await inSchema('fresh', async (db) => {
     await db.query(await migration('001_initial.sql'));
     await db.query(await migration('002_repair_triggers_and_meals.sql'));
+    await db.query(await migration('003_rating_patient_role.sql'));
     await exerciseTriggers(db);
   });
 });
 
-test('database with 001 upgrades through the forward repair migration', async () => {
+test('database with 001 and 002 upgrades through the rating trigger migration', async () => {
   await inSchema('upgrade', async (db) => {
     await db.query(await migration('001_initial.sql'));
     await db.query(await migration('002_repair_triggers_and_meals.sql'));
+    await db.query(await migration('003_rating_patient_role.sql'));
     await exerciseTriggers(db);
+  });
+});
+
+test('complete development seed succeeds twice without duplicate records', async () => {
+  await inSchema('seed', async (db, schema) => {
+    await db.query(await migration('001_initial.sql'));
+    await db.query(await migration('002_repair_triggers_and_meals.sql'));
+    await db.query(await migration('003_rating_patient_role.sql'));
+    const url = new URL(connectionString);
+    url.searchParams.set('options', `-csearch_path=${schema},public`);
+    const env = { ...process.env, TEST_DATABASE_URL: url.toString() };
+    await run(process.execPath, [seedFile, '--test'], env);
+    await run(process.execPath, [seedFile, '--test'], env);
+    assert.equal(Number((await db.query('SELECT count(*) FROM doctor_ratings')).rows[0].count), 11);
+    assert.equal(Number((await db.query("SELECT count(*) FROM users WHERE id IN ('omar-hassan','DR-001','DR-002','DR-003','DR-004')")).rows[0].count), 5);
+    assert.equal(Number((await db.query("SELECT count(*) FROM meals WHERE id IN ('f1','f2','f3','f4')")).rows[0].count), 4);
   });
 });
