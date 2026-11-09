@@ -8,6 +8,9 @@
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "dev:api": "npm --workspace services/api run dev",
+    "db:migrate": "npm --workspace services/api run db:migrate",
+    "db:seed": "npm --workspace services/api run db:seed",
+    "db:import": "npm --workspace services/api run db:import --",
     "build:web": "npm --workspace apps/web run build",
     "test:api": "npm --workspace services/api test"
   }

@@ -243,7 +243,7 @@ export default function App() {
     }
     const found = accounts.find((item) => item.email.toLowerCase() === identifier.toLowerCase() && item.role === mode && item.password === password);
     if (found) {
-      try { await bridgeAccount(found); } catch { return 'Sync service is unavailable. Start it with npm run sync.'; }
+      try { await bridgeAccount(found); } catch { return 'Sync service is unavailable. Start PostgreSQL and run npm run dev:api.'; }
       setSession({ id: found.id, role: found.role });
       return null;
     }
@@ -256,7 +256,7 @@ export default function App() {
   };
   const register = async (newAccount: Account) => {
     if (newAccount.email.toLowerCase() === 'admin' || accounts.some((item) => item.email.toLowerCase() === newAccount.email.toLowerCase())) return 'An account with this email already exists.';
-    try { await bridgeAccount(newAccount); } catch { return 'Sync service is unavailable. Start it with npm run sync.'; }
+    try { await bridgeAccount(newAccount); } catch { return 'Sync service is unavailable. Start PostgreSQL and run npm run dev:api.'; }
     setAccounts((current) => [...current, newAccount]);
     if (newAccount.patientProfile) setAssignments((current) => [...current, { patientId: newAccount.id, doctorId: newAccount.patientProfile!.selectedDoctorId, status: 'pending' }]);
     setSession({ id: newAccount.id, role: newAccount.role });

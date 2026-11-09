@@ -5,6 +5,14 @@
   "scripts": {
     "dev": "node --watch index.mjs",
     "start": "node index.mjs",
-    "test": "node --test sync.test.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:migrate:test": "node scripts/migrate.mjs --test",
+    "db:seed": "node scripts/seed.mjs",
+    "db:seed:test": "node scripts/seed.mjs --test",
+    "db:import": "node scripts/import-json.mjs",
+    "test": "node scripts/migrate.mjs --test && node scripts/seed.mjs --test && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }
