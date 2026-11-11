@@ -407,7 +407,9 @@ class _PatientPortalState extends State<PatientPortal> with WidgetsBindingObserv
         Navigator.pop(context, item);
       }, child: const Text('Save'))],
     )));
-    first.dispose(); second.dispose(); third.dispose();
+    // showDialog completes when Navigator.pop is called, before the route's closing
+    // animation has finished using these controllers. Let the now-unreachable
+    // controllers be collected after the dialog subtree unmounts.
     if (result != null) await add(kind, result);
   }
 
@@ -485,7 +487,8 @@ class _PatientPortalState extends State<PatientPortal> with WidgetsBindingObserv
         Navigator.pop(context, {'contactName': name.text.trim(), 'relationship': relationship.text.trim(), 'phoneNumber': phone.text, 'isPrimary': primary});
       }, child: const Text('Save'))],
     )));
-    name.dispose(); relationship.dispose(); phone.dispose();
+    // The closing dialog animation can still render its fields after showDialog
+    // returns, so disposing these controllers here causes a runtime assertion.
     if (value == null || contactsSaving) return;
     setState(() { contactsSaving = true; contactsError = null; });
     try { if (existing == null) { await widget.api.createEmergencyContact(value); } else { await widget.api.updateEmergencyContact('${existing['id']}', value); } await _loadContacts(); }
