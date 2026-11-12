@@ -685,6 +685,8 @@ class SyncApi {
           _sameInstant(found['recordedAt'], sent['recordedAt']),
       'bolus' => _sameNumber(found['administeredUnits'] ?? found['recorded'],
               sent['administeredUnits'] ?? sent['recorded']) &&
+          _sameOptionalNumber(found['carbsG'],
+              sent.containsKey('carbsG') ? sent['carbsG'] : sent['carbs']) &&
           _sameInstant(found['administeredAt'], sent['administeredAt']),
       'food' => found['status'] == sent['status'] &&
           _sameNumber(found['announcedCarbsG'] ?? found['carbs'],
@@ -760,6 +762,11 @@ class SyncApi {
     }
 
     return parse(a) == parse(b);
+  }
+
+  bool _sameOptionalNumber(dynamic a, dynamic b) {
+    if (a == null && b == null) return true;
+    return _sameNumber(a, b);
   }
 
   Future<List<dynamic>> doctors() async =>

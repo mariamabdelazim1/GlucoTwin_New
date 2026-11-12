@@ -16,7 +16,7 @@ npm run dev:api
 ```
 
 `db:migrate` is also the upgrade command for an existing database. It records and skips
-previously applied migrations, then applies `003_rating_patient_role.sql`; do not reset or
+previously applied migrations, then applies `004_insulin_optional_carbs.sql`; do not reset or
 recreate the database. For migration regression setup only, the runner supports
 `node scripts/migrate.mjs --test --through=002_repair_triggers_and_meals.sql` against the dedicated
 `TEST_DATABASE_URL`.
@@ -69,7 +69,7 @@ Communication:
 Medical events:
 
 - `glucose_readings` in mg/dL
-- `insulin_doses` in units; these are actual administrations, never hypothetical scenarios
+- `insulin_doses` in units with nullable `carbs_g`; these are actual administrations, never hypothetical scenarios
 - `basal_schedule_entries` in U/hour with prescribed-versus-confirmed kind and overlap prevention
 - `meals`, separating announced carbohydrates from nullable confirmed consumption
 
@@ -90,6 +90,13 @@ Medical event timestamps sent to the API must be complete ISO 8601 values ending
 `administeredAt`, and meals require `plannedEatingAt` plus `actualEatingAt` when eaten.
 The clients capture these once when the patient logs or confirms the event, so a retry
 does not turn network receipt time into medical event time.
+
+Actual insulin logging requires the administered dose and `administeredAt`. `carbsG` is
+optional: omit it for an unknown amount, or send a finite nonnegative number (including
+zero). New insulin logs do not accept or require pre-meal glucose and do not create a
+glucose reading or meal. Migration 004 retains historical compatibility payloads, so old
+pre-meal context remains readable while valid legacy carbohydrate values are copied into
+the nullable canonical column.
 
 ## Meal lifecycle and updates
 

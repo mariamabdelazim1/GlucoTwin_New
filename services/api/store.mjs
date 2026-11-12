@@ -4,6 +4,28 @@ import { withTransaction } from './db.mjs';
 const text = (value) => value === undefined || value === null ? '' : String(value);
 const legacyPayload = (row) => withoutLocalSyncMetadata(row.legacy_payload);
 
+function legacyCarbs(legacy) {
+  if (legacy.carbs === undefined || legacy.carbs === null) return null;
+  try { return strictUnit(legacy.carbs, 'g', 'Carbohydrates'); }
+  catch { return null; }
+}
+
+function bolusJson(row) {
+  const legacy = legacyPayload(row);
+  const carbsG = row.carbs_g === null || row.carbs_g === undefined
+    ? legacyCarbs(legacy) : Number(row.carbs_g);
+  return {
+    ...legacy,
+    id: row.id,
+    patientSlug: row.patient_id,
+    carbsG,
+    carbs: carbsG === null ? 'Not provided' : `${carbsG}g`,
+    administeredUnits: Number(row.administered_units),
+    administeredAt: row.administered_at.toISOString(),
+    time: legacy.time || row.administered_at.toISOString(),
+  };
+}
+
 function accountFromRow(row) {
   if (!row) return null;
   const account = { id: row.id, role: row.role, email: row.email };
@@ -169,11 +191,7 @@ export async function snapshot(db, user) {
       time: legacy.time || row.measured_at.toISOString() };
   });
   const food = (await queryVisible(`SELECT * FROM meals WHERE patient_id=ANY($1::text[]) ORDER BY planned_eating_at DESC`)).map(mealJson);
-  const bolus = (await queryVisible(`SELECT * FROM insulin_doses WHERE patient_id=ANY($1::text[]) ORDER BY administered_at DESC`)).map((row) => {
-    const legacy = legacyPayload(row);
-    return { ...legacy, id: row.id, patientSlug: row.patient_id,
-      administeredUnits: Number(row.administered_units), administeredAt: row.administered_at.toISOString() };
-  });
+  const bolus = (await queryVisible(`SELECT * FROM insulin_doses WHERE patient_id=ANY($1::text[]) ORDER BY administered_at DESC`)).map(bolusJson);
   const messages = (await db.query(`SELECT m.*, c.patient_id, c.doctor_id, sender.role sender_role
     FROM messages m JOIN conversations c ON c.id=m.conversation_id JOIN users sender ON sender.id=m.sender_id
     WHERE c.status='active' AND ${user.role === 'patient' ? 'c.patient_id=$1' : 'c.doctor_id=$1'}
@@ -263,6 +281,7 @@ function sameClinicalRecord(table, row, expected) {
   if (table === 'glucose_readings') return sameNumber(row.glucose_mg_dl, expected.value)
     && sameInstant(row.measured_at, expected.measuredAt) && row.source === expected.source;
   if (table === 'insulin_doses') return sameNumber(row.administered_units, expected.units)
+    && sameNumber(row.carbs_g, expected.carbsG)
     && sameInstant(row.administered_at, expected.administeredAt) && row.decision_source === expected.decisionSource
     && row.recommendation_id === expected.recommendationId;
   if (table === 'meals') return row.meal_name === expected.mealName
@@ -300,15 +319,18 @@ export async function addPatientRecord(pool, kind, item, user) {
         [item.id, user.id, measuredAt, value, item.source || 'manual', JSON.stringify(withoutLocalSyncMetadata(item))]));
     } else if (kind === 'bolus') {
       const units = strictUnit(item.administeredUnits ?? item.recorded, 'U', 'Administered insulin');
+      const carbsG = Object.hasOwn(item, 'carbsG')
+        ? optionalNumber(item.carbsG, 'Carbohydrates')
+        : Object.hasOwn(item, 'carbs') ? strictUnit(item.carbs, 'g', 'Carbohydrates') : null;
       const administeredAt = timestamp(item.administeredAt, 'Insulin administeredAt');
       const decisionSource = item.decisionSource || 'user_decided';
       const recommendationId = item.recommendationId || null;
       created = await idempotentInsert(db, 'insulin_doses', item.id, user.id,
-        { units, administeredAt, decisionSource, recommendationId }, () => db.query(`INSERT INTO insulin_doses
-        (id,patient_id,administered_units,administered_at,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [item.id, user.id, units, administeredAt,
+        { units, carbsG, administeredAt, decisionSource, recommendationId }, () => db.query(`INSERT INTO insulin_doses
+        (id,patient_id,administered_units,carbs_g,administered_at,decision_source,recommendation_id,confirmation_provenance,legacy_payload)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [item.id, user.id, units, carbsG, administeredAt,
         decisionSource, recommendationId,
-        JSON.stringify(item.confirmationProvenance || { source: 'patient_log' }), JSON.stringify(withoutLocalSyncMetadata(item))]));
+        JSON.stringify(item.confirmationProvenance || { source: 'patient_log' }), JSON.stringify(withoutLocalSyncMetadata({ ...item, carbs: undefined, preMeal: undefined }))]));
     } else if (kind === 'food') {
       const legacy = Object.hasOwn(item, 'carbs');
       const announced = legacy ? strictUnit(item.carbs, 'g', 'Announced carbohydrates') : optionalNumber(item.announcedCarbsG, 'Announced carbohydrates');

@@ -141,9 +141,12 @@ export interface BolusEntry {
   time: string;
   meal: string;
   carbs: string;
-  preMeal: string;
+  carbsG?: number | null;
+  /** Historical compatibility context. New insulin logs do not collect this. */
+  preMeal?: string;
   recommended: string;
   recorded: string;
+  administeredUnits?: number;
   administeredAt?: string;
   syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
   syncAttempts?: number;

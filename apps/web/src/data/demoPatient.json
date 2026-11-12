@@ -24,8 +24,8 @@
     { "id": "demo-glucose-lunch", "patientSlug": "omar-hassan", "value": 184, "time": "13:10", "recordedAt": "2026-01-01T13:10:00Z" }
   ],
   "messages": [
-    { "id": "demo-message-patient", "doctorId": "DR-001", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "avatar": "OH", "from": "patient", "text": "Demo check-in: I logged lunch. Can you see my records?", "time": "13:15", "unread": false },
-    { "id": "demo-message-doctor", "doctorId": "DR-001", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "avatar": "OH", "from": "doctor", "text": "Yes, your demo lunch and CGM chart are visible.", "time": "13:20", "unread": false }
+    { "id": "demo-message-patient", "doctorId": "DR-001", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "avatar": "OH", "from": "patient", "text": "Demo check-in: I logged lunch. Can you see my records?", "time": "13:15", "sentAt": "2026-01-01T13:15:00Z", "unread": false },
+    { "id": "demo-message-doctor", "doctorId": "DR-001", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "avatar": "OH", "from": "doctor", "text": "Yes, your demo lunch and CGM chart are visible.", "time": "13:20", "sentAt": "2026-01-01T13:20:00Z", "unread": false }
   ],
   "food": [
     { "id": "f1", "patientSlug": "omar-hassan", "patient": "Omar Hassan", "time": "08:05", "meal": "Breakfast", "items": "Greek yogurt, oats, berries", "carbs": "54g", "impact": "+32 mg/dL", "status": "Reviewed" },

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:glucotwin/patient_app.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const email = String.fromEnvironment('UI_TEST_EMAIL',
     defaultValue: 'ios.accept.20261111@example.test');
@@ -9,8 +11,8 @@ const patientName = String.fromEnvironment('UI_TEST_NAME',
     defaultValue: 'iOS Acceptance Patient');
 const password = 'SyntheticPass123!';
 
-Finder field(String label) => find.byWidgetPredicate((widget) =>
-    widget is TextField && widget.decoration?.labelText == label);
+Finder field(String label) => find.byWidgetPredicate(
+    (widget) => widget is TextField && widget.decoration?.labelText == label);
 
 Future<void> waitFor(WidgetTester tester, Finder finder,
     {Duration timeout = const Duration(seconds: 20)}) async {
@@ -27,11 +29,27 @@ Future<void> tapVisible(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> bringIntoView(WidgetTester tester, Finder finder) async {
+  for (var attempt = 0; attempt < 12; attempt++) {
+    final rect = tester.getRect(finder.first);
+    if (rect.top >= 100 && rect.bottom <= 740) return;
+    await tester.drag(
+        find.byType(ListView).first, Offset(0, rect.bottom > 740 ? -220 : 220));
+    await tester.pumpAndSettle();
+  }
+  fail('Could not bring $finder into the tappable viewport.');
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('real iOS patient journey writes and reloads clinical records',
       (tester) async {
+    await const FlutterSecureStorage(
+      iOptions: IOSOptions(
+          accessibility: KeychainAccessibility.first_unlock_this_device),
+    ).deleteAll();
+    await (await SharedPreferences.getInstance()).clear();
     await tester.pumpWidget(const PatientMobileApp());
     await waitFor(tester, find.text('New patient? Create account'));
     await tapVisible(tester, find.text('New patient? Create account'));
@@ -60,11 +78,16 @@ void main() {
     await waitFor(tester, find.textContaining('143'));
 
     await tapVisible(tester, find.text('Log bolus'));
-    await tester.enterText(field('Carbs g'), '42');
-    await tester.enterText(field('Pre-meal glucose mg/dL'), '143');
+    expect(field('Pre-meal glucose mg/dL'), findsNothing);
+    await tester.enterText(field('Carbs (g, optional)'), '-1');
+    await tester.enterText(field('Bolus units'), '1');
+    await tapVisible(tester, find.text('Save'));
+    await waitFor(tester, find.textContaining('finite, non-negative'));
+    await tester.enterText(field('Carbs (g, optional)'), '');
     await tester.enterText(field('Bolus units'), '4.5');
     await tapVisible(tester, find.text('Save'));
     await waitFor(tester, find.textContaining('4.5 U at'));
+    expect(find.text('Carbs: Not provided'), findsWidgets);
 
     await tapVisible(tester, find.text('Add food'));
     await tester.enterText(field('Food items'), 'Synthetic planned meal');
@@ -74,7 +97,9 @@ void main() {
     expect(find.textContaining('42g carbs · planned'), findsOneWidget);
 
     await tapVisible(tester, find.text('Profile'));
-    await tapVisible(tester, find.text('Add contact'));
+    await bringIntoView(tester, find.text('Add contact'));
+    await tester.tap(find.text('Add contact'));
+    await tester.pumpAndSettle();
     await tester.enterText(field('Name'), 'Synthetic Contact One');
     await tester.enterText(field('Relationship'), 'Sibling');
     await tester.enterText(field('Phone with country code'), '+201000000001');

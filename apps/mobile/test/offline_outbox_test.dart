@@ -151,6 +151,46 @@ void main() {
         isEmpty);
   });
 
+  test('offline insulin keeps omitted carbs absent and explicit zero known',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    final posted = <Map<String, dynamic>>[];
+    final serverBolus = <Map<String, dynamic>>[];
+    final client = MockClient((request) async {
+      if (request.method == 'POST') {
+        final body = Map<String, dynamic>.from(jsonDecode(request.body) as Map);
+        posted.add(body);
+        serverBolus.add({...body, 'carbsG': body['carbsG']});
+        return http.Response('{}', 200);
+      }
+      return snapshotResponse('patient-a', bolus: serverBolus);
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    await api.queueAdd('bolus', {
+      'id': 'dose-without-carbs',
+      'patientSlug': 'patient-a',
+      'administeredUnits': 2,
+      'recorded': '2 U',
+      'administeredAt': '2026-11-12T08:00:00Z'
+    });
+    await api.queueAdd('bolus', {
+      'id': 'dose-zero-carbs',
+      'patientSlug': 'patient-a',
+      'administeredUnits': 1,
+      'recorded': '1 U',
+      'carbsG': 0,
+      'administeredAt': '2026-11-12T08:01:00Z'
+    });
+    await api.saveToken('synthetic-token');
+    await api.syncOutbox(bypassRetryDelay: true);
+    expect(posted, hasLength(2));
+    expect(posted.first.containsKey('carbsG'), isFalse);
+    expect(posted.last['carbsG'], 0);
+    expect(storedOutbox(store, 'patient-a'), isEmpty);
+  });
+
   test('different content on 409 remains a visible conflict', () async {
     final store = MemoryStore();
     await seedSession(store, 'patient-a');

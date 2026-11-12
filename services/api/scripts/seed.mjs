@@ -44,9 +44,9 @@ try {
       VALUES($1,$2,$3,$4,$5,$6,'eaten',$6,$5,'user_chosen',$7,$8) ON CONFLICT DO NOTHING`,
       [item.id, item.patientSlug, item.meal, item.items, grams(item.carbs), at(item.time), JSON.stringify({ source: 'documented_synthetic_fixture' }), JSON.stringify(withoutLocalSyncMetadata(item))]);
     for (const item of demo.bolus) await db.query(`INSERT INTO insulin_doses
-      (id,patient_id,administered_units,administered_at,decision_source,confirmation_provenance,legacy_payload)
-      VALUES($1,$2,$3,$4,'user_decided',$5,$6) ON CONFLICT DO NOTHING`,
-      [item.id, item.patientSlug, units(item.recorded), at(item.time), JSON.stringify({ synthetic: true }), JSON.stringify(withoutLocalSyncMetadata(item))]);
+      (id,patient_id,administered_units,carbs_g,administered_at,decision_source,confirmation_provenance,legacy_payload)
+      VALUES($1,$2,$3,$4,$5,'user_decided',$6,$7) ON CONFLICT DO NOTHING`,
+      [item.id, item.patientSlug, units(item.recorded), grams(item.carbs), at(item.time), JSON.stringify({ synthetic: true }), JSON.stringify(withoutLocalSyncMetadata(item))]);
     for (const item of demo.messages) await db.query(`INSERT INTO messages
       (id,conversation_id,sender_id,body,sent_at,is_read,legacy_payload) VALUES($1,'demo-conversation',$2,$3,$4,$5,$6)
       ON CONFLICT DO NOTHING`, [item.id, item.from === 'patient' ? item.patientSlug : item.doctorId, item.text, at(item.time), !item.unread, JSON.stringify(withoutLocalSyncMetadata(item))]);

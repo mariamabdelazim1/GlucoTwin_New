@@ -297,6 +297,29 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
       id: `bolus-${runId}`, patientSlug: firstId, administeredUnits: 2, administeredAt: legacyTime.replace('.000Z', 'Z'), time: 'display only',
     } })).status, 200);
     assert.equal((await db.query('SELECT administered_at FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].administered_at.toISOString(), legacyTime);
+    assert.equal((await db.query('SELECT carbs_g FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].carbs_g, null);
+    assert.deepEqual((await request('snapshot', { token: first })).body.bolus.find((item) => item.id === `bolus-${runId}`).carbsG, null);
+    const glucoseCountBeforeBolus = Number((await db.query('SELECT count(*) FROM glucose_readings WHERE patient_id=$1', [firstId])).rows[0].count);
+    for (const [suffix, carbsG] of [['zero', 0], ['supplied', 37.5]]) {
+      const result = await request('bolus', { token: first, method: 'POST', data: {
+        id: `bolus-${suffix}-${runId}`, patientSlug: firstId, administeredUnits: 1.5, carbsG, administeredAt: legacyTime,
+      } });
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(Number((await db.query('SELECT carbs_g FROM insulin_doses WHERE id=$1', [`bolus-${suffix}-${runId}`])).rows[0].carbs_g), carbsG);
+    }
+    for (const invalid of [-1, false, ' ', 'bad', 'NaN', 'Infinity']) {
+      const result = await request('bolus', { token: first, method: 'POST', data: {
+        id: `bolus-invalid-${String(invalid)}-${runId}`, patientSlug: firstId,
+        administeredUnits: 1, carbsG: invalid, administeredAt: legacyTime,
+      } });
+      assert.equal(result.status, 400, `accepted invalid insulin carbs ${String(invalid)}`);
+    }
+    assert.equal(Number((await db.query('SELECT count(*) FROM glucose_readings WHERE patient_id=$1', [firstId])).rows[0].count), glucoseCountBeforeBolus);
+    await db.query(`INSERT INTO insulin_doses(id,patient_id,administered_units,administered_at,decision_source,legacy_payload)
+      VALUES($1,$2,3,$3,'user_decided',$4)`, [`historical-bolus-${runId}`, firstId, legacyTime, { carbs: '15g', preMeal: '129 mg/dL' }]);
+    const historicalBolus = (await request('snapshot', { token: first })).body.bolus.find((item) => item.id === `historical-bolus-${runId}`);
+    assert.equal(historicalBolus.carbsG, 15);
+    assert.equal(historicalBolus.preMeal, '129 mg/dL');
     assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM insulin_doses WHERE id=$1', [`bolus-${runId}`])).rows[0].legacy_payload);
     await db.query('UPDATE insulin_doses SET legacy_payload=legacy_payload || $2::jsonb WHERE id=$1', [`bolus-${runId}`, JSON.stringify(localSyncMetadata)]);
     assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.bolus.find((item) => item.id === `bolus-${runId}`));
@@ -325,6 +348,13 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM messages WHERE id=$1', [messageOne.id])).rows[0].legacy_payload);
     await db.query('UPDATE messages SET legacy_payload=legacy_payload || $2::jsonb WHERE id=$1', [messageOne.id, JSON.stringify(localSyncMetadata)]);
     assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.messages.find((item) => item.id === messageOne.id));
+    const equalTime = '2026-01-01T13:11:00.000Z';
+    const equalA = { id: `message-equal-a-${runId}`, patientSlug: firstId, from: 'doctor', text: 'Equal timestamp A', sentAt: equalTime };
+    const equalZ = { id: `message-equal-z-${runId}`, patientSlug: firstId, from: 'patient', text: 'Equal timestamp Z', sentAt: equalTime };
+    assert.equal((await request('messages', { token: doctorOne, method: 'POST', data: equalA })).status, 200);
+    assert.equal((await request('messages', { token: first, method: 'POST', data: equalZ })).status, 200);
+    const orderedMessageIds = (await request('snapshot', { token: first })).body.messages.map((item) => item.id);
+    assert.deepEqual(orderedMessageIds, [messageOne.id, equalA.id, equalZ.id]);
     assert.equal((await request('patient/doctor-request', { token: first, method: 'POST', data: { doctorId: 'DR-002' } })).status, 200);
     assert.equal((await request('snapshot', { token: doctorOne })).body.messages.some((item) => item.id === messageOne.id), false);
     assert.equal((await request('snapshot', { token: doctorTwo })).body.messages.some((item) => item.id === messageOne.id), false);
@@ -356,13 +386,15 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     const directory = await mkdtemp(join(tmpdir(), 'glucotwin-import-'));
     const importId = `imported-${runId}`;
     const importMealId = `imported-meal-${runId}`;
+    const importBolusId = `imported-bolus-${runId}`;
     const importRatingId = `imported-rating-${runId}`;
     const fixture = join(directory, 'data.json');
     await writeFile(fixture, JSON.stringify({
       accounts: [{ id: importId, role: 'patient', email: `${importId}@example.test`, passwordHash: passwordHash('import-password'), patientProfile: { fullName: 'Imported Patient' } }],
       assignments: [], food: [{ id: importMealId, patientSlug: importId, meal: 'Legacy meal', items: 'Unknown',
         carbs: '20g', status: 'Recorded', plannedEatingAt: '2026-06-01T12:00:00+02:00', ...localSyncMetadata }],
-      bolus: [], glucose: [], messages: [], ratings: [{ id: importRatingId, doctorId: 'DR-001', patientId: null, score: 4, source: 'imported' }],
+      bolus: [{ id: importBolusId, patientSlug: importId, recorded: '2 U', administeredAt: '2026-06-01T13:00:00+02:00' }],
+      glucose: [], messages: [], ratings: [{ id: importRatingId, doctorId: 'DR-001', patientId: null, score: 4, source: 'imported' }],
     }));
     for (let pass = 0; pass < 2; pass++) {
       const imported = spawn(process.execPath, [importFile, fixture], { env: { ...process.env, DATABASE_URL: databaseUrl } });
@@ -378,6 +410,7 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     const importedRating = (await db.query('SELECT patient_id,source FROM doctor_ratings WHERE id=$1', [importRatingId])).rows[0];
     assert.equal(importedRating.patient_id, null);
     assert.equal(importedRating.source, 'imported');
+    assert.equal((await db.query('SELECT carbs_g FROM insulin_doses WHERE id=$1', [importBolusId])).rows[0].carbs_g, null);
   } finally {
     if (server) await stopServer(server);
     await db.end();

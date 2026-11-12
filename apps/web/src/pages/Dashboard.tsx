@@ -5,6 +5,7 @@ import { StatCard } from '../components/ui/StatCard';
 import { PatientTable } from '../components/patients/PatientTable';
 import { Avatar } from '../components/ui/Avatar';
 import type { BolusEntry, FoodEntry, Message, Patient } from '../types';
+import { chronologicalMessages } from '../utils/messages';
 
 export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, bolusEntries, messages, acceptedPatientSlugs, patientRequests, assignmentActions, onAcceptPatient, onDeclinePatient }: { doctorId: string; doctorName: string; patientRecords: Patient[]; foodEntries: FoodEntry[]; bolusEntries: BolusEntry[]; messages: Message[]; acceptedPatientSlugs: string[]; patientRequests: string[]; assignmentActions: Record<string, { state: 'pending' | 'success' | 'error'; message: string }>; onAcceptPatient: (slug: string) => Promise<void>; onDeclinePatient: (slug: string) => Promise<void> }) {
   const assigned = patientRecords.filter((patient) => acceptedPatientSlugs.includes(patient.slug));
@@ -46,7 +47,7 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
         <section className="surface p-4">
           <h2 className="text-lg font-semibold">Recent Messages</h2>
           <div className="mt-4 space-y-3">
-            {[...patientMessages].reverse().slice(0, 3).map((message) => (
+            {chronologicalMessages(patientMessages).reverse().slice(0, 3).map((message) => (
               <Link to={`/messages?patient=${message.patientSlug}`} key={message.id} className="focus-ring flex gap-3 rounded-lg border border-clinical-border p-3 hover:bg-emerald-50">
                 <Avatar label={message.avatar} />
                 <span className="min-w-0 flex-1"><strong className="text-sm">{message.patient}</strong><span className="ml-2 text-xs text-clinical-muted">{message.time}</span><p className="truncate text-sm text-clinical-muted">{message.text}</p></span>
@@ -85,7 +86,7 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
               {recentBolus.map((entry) => (
                 <div key={entry.id} className="rounded-md bg-clinical-bg p-3 text-sm">
                   <strong>{entry.patient}</strong> recorded {entry.recorded} at {entry.time}
-                  <p className="mt-1 text-clinical-muted">{entry.meal} · {entry.carbs} carbs · pre-meal {entry.preMeal}</p>
+                  <p className="mt-1 text-clinical-muted">{entry.meal} · Carbs: {entry.carbs || 'Not provided'}</p>
                 </div>
               ))}
             </div>

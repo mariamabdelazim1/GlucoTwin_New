@@ -1,12 +1,14 @@
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Paperclip, Send } from 'lucide-react';
 import type { Message, Patient, Role } from '../../types';
 import { Avatar } from '../ui/Avatar';
 import { GlucoseValue } from '../clinical/GlucoseValue';
 import { TrendIndicator } from '../clinical/TrendIndicator';
+import { chronologicalMessages, latestConversations } from '../../utils/messages';
 
 export function ConversationList({ messages, selected, onSelect }: { messages: Message[]; selected: string; onSelect: (slug: string) => void }) {
-  const conversations = Array.from(new Map(messages.map((message) => [message.patientSlug, message])).values());
+  const conversations = latestConversations(messages);
   return (
     <aside className="surface overflow-hidden">
       <div className="border-b border-clinical-border p-4">
@@ -32,6 +34,23 @@ export function ConversationList({ messages, selected, onSelect }: { messages: M
 }
 
 export function MessageThread({ patient, doctorName, messages, draft, setDraft, onSend, canOpenPatient = true, viewerRole }: { patient: Patient; doctorName: string; messages: Message[]; draft: string; setDraft: (value: string) => void; onSend: () => void; canOpenPatient?: boolean; viewerRole: Role }) {
+  const ordered = useMemo(() => chronologicalMessages(messages), [messages]);
+  const scroller = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
+  const previousPatient = useRef<string | undefined>(undefined);
+  const newest = ordered.length ? ordered[ordered.length - 1] : undefined;
+
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const openedConversation = previousPatient.current !== patient.slug;
+    previousPatient.current = patient.slug;
+    if (openedConversation || nearBottom.current || newest?.from === viewerRole) {
+      element.scrollTop = element.scrollHeight;
+      nearBottom.current = true;
+    }
+  }, [newest?.id, newest?.sentAt, newest?.from, ordered.length, patient.slug, viewerRole]);
+
   return (
     <section className="surface flex min-h-[620px] flex-col overflow-hidden">
       <header className="flex items-center justify-between border-b border-clinical-border p-4">
@@ -44,8 +63,11 @@ export function MessageThread({ patient, doctorName, messages, draft, setDraft, 
         </div>
         {canOpenPatient ? <Link to={`/patients/${patient.slug}`} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm font-semibold text-clinical-primary">View patient</Link> : null}
       </header>
-      <div className="flex-1 space-y-4 overflow-y-auto bg-clinical-bg p-4">
-        {messages.map((message) => (
+      <div ref={scroller} data-testid="message-scroll" onScroll={(event) => {
+        const element = event.currentTarget;
+        nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 96;
+      }} className="flex-1 space-y-4 overflow-y-auto bg-clinical-bg p-4">
+        {ordered.map((message) => (
           <div key={message.id} className={`flex ${message.from === viewerRole ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[78%] rounded-lg border px-4 py-3 text-sm shadow-clinical ${message.from === viewerRole ? 'border-emerald-200 bg-emerald-50' : 'border-clinical-border bg-white'}`}>
               <p>{message.text}</p>

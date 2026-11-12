@@ -78,15 +78,24 @@ test('fresh database applies all migrations and trigger invariants permit real w
     await db.query(await migration('001_initial.sql'));
     await db.query(await migration('002_repair_triggers_and_meals.sql'));
     await db.query(await migration('003_rating_patient_role.sql'));
+    await db.query(await migration('004_insulin_optional_carbs.sql'));
     await exerciseTriggers(db);
+    await db.query("INSERT INTO insulin_doses(id,patient_id,administered_units,carbs_g,administered_at,decision_source) VALUES('zero-carbs','p1',1,0,now(),'user_decided')");
+    await assert.rejects(db.query("INSERT INTO insulin_doses(id,patient_id,administered_units,carbs_g,administered_at,decision_source) VALUES('negative-carbs','p1',1,-1,now(),'user_decided')"));
   });
 });
 
-test('database with 001 and 002 upgrades through the rating trigger migration', async () => {
+test('database with 001 through 003 upgrades and preserves historical insulin context', async () => {
   await inSchema('upgrade', async (db) => {
     await db.query(await migration('001_initial.sql'));
     await db.query(await migration('002_repair_triggers_and_meals.sql'));
     await db.query(await migration('003_rating_patient_role.sql'));
+    await db.query("INSERT INTO users(id,role,email,password_hash) VALUES('legacy-p','patient','legacy-p@test.invalid','x')");
+    await db.query("INSERT INTO insulin_doses(id,patient_id,administered_units,administered_at,decision_source,legacy_payload) VALUES('legacy-dose','legacy-p',2,now(),'user_decided',$1)", [{ carbs: '42g', preMeal: '131 mg/dL' }]);
+    await db.query(await migration('004_insulin_optional_carbs.sql'));
+    const legacy = (await db.query("SELECT carbs_g,legacy_payload FROM insulin_doses WHERE id='legacy-dose'")).rows[0];
+    assert.equal(Number(legacy.carbs_g), 42);
+    assert.equal(legacy.legacy_payload.preMeal, '131 mg/dL');
     await exerciseTriggers(db);
   });
 });
@@ -96,6 +105,7 @@ test('complete development seed succeeds twice without duplicate records', async
     await db.query(await migration('001_initial.sql'));
     await db.query(await migration('002_repair_triggers_and_meals.sql'));
     await db.query(await migration('003_rating_patient_role.sql'));
+    await db.query(await migration('004_insulin_optional_carbs.sql'));
     const url = new URL(connectionString);
     url.searchParams.set('options', `-csearch_path=${schema},public`);
     const env = { ...process.env, TEST_DATABASE_URL: url.toString() };

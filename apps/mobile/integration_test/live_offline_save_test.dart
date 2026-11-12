@@ -68,8 +68,6 @@ void main() {
     await bringIntoView(tester, find.text('Log bolus'));
     await tester.tap(find.text('Log bolus'));
     await tester.pumpAndSettle();
-    await tester.enterText(field('Carbs g'), '45');
-    await tester.enterText(field('Pre-meal glucose mg/dL'), '140');
     await tester.enterText(field('Bolus units'), '3');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();

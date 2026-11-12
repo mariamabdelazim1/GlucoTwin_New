@@ -22,6 +22,36 @@ String _profileText(dynamic value) {
   return text.isEmpty ? 'Not provided' : text;
 }
 
+int compareConversationMessages(
+    Map<String, dynamic> left, Map<String, dynamic> right) {
+  final leftTime = DateTime.tryParse('${left['sentAt'] ?? ''}')
+          ?.toUtc()
+          .microsecondsSinceEpoch ??
+      0;
+  final rightTime = DateTime.tryParse('${right['sentAt'] ?? ''}')
+          ?.toUtc()
+          .microsecondsSinceEpoch ??
+      0;
+  return leftTime.compareTo(rightTime) != 0
+      ? leftTime.compareTo(rightTime)
+      : '${left['id'] ?? ''}'.compareTo('${right['id'] ?? ''}');
+}
+
+List<Map<String, dynamic>> chronologicalConversationMessages(dynamic rows) {
+  final messages = ((rows as List?) ?? [])
+      .map((value) => Map<String, dynamic>.from(value as Map))
+      .toList();
+  messages.sort(compareConversationMessages);
+  return messages;
+}
+
+String insulinCarbsLabel(Map<String, dynamic> item) {
+  final canonical = item['carbsG'];
+  if (canonical is num) return '${canonical}g';
+  final legacy = '${item['carbs'] ?? ''}'.trim();
+  return legacy.isEmpty || legacy == 'Not provided' ? 'Not provided' : legacy;
+}
+
 class PatientMobileApp extends StatefulWidget {
   const PatientMobileApp({super.key});
   @override
@@ -662,6 +692,8 @@ class PatientPortal extends StatefulWidget {
 class _PatientPortalState extends State<PatientPortal>
     with WidgetsBindingObserver {
   int tab = 0;
+  final pageScroll = ScrollController();
+  bool nearMessageBottom = true;
   List<Map<String, dynamic>> contacts = [];
   bool contactsLoading = false;
   bool contactsSaving = false;
@@ -676,7 +708,9 @@ class _PatientPortalState extends State<PatientPortal>
       'profile' => 3,
       _ => 0
     };
+    pageScroll.addListener(_trackMessageScroll);
     _loadContacts();
+    if (tab == 2) _scrollToLatest(force: true);
   }
 
   String? actionError;
@@ -724,6 +758,37 @@ class _PatientPortalState extends State<PatientPortal>
     }
   }
 
+  void _trackMessageScroll() {
+    if (!pageScroll.hasClients || tab != 2) return;
+    nearMessageBottom =
+        pageScroll.position.maxScrollExtent - pageScroll.offset <= 96;
+  }
+
+  void _scrollToLatest({bool force = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !pageScroll.hasClients || tab != 2) return;
+      if (!force && !nearMessageBottom) return;
+      pageScroll.animateTo(pageScroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+      nearMessageBottom = true;
+    });
+  }
+
+  String _newestMessageKey(dynamic rows) {
+    final ordered = chronologicalConversationMessages(rows);
+    if (ordered.isEmpty) return '';
+    final newest = ordered.last;
+    return '${ordered.length}:${newest['id']}:${newest['sentAt']}';
+  }
+
+  @override
+  void didUpdateWidget(covariant PatientPortal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final changed = _newestMessageKey(oldWidget.snapshot['messages']) !=
+        _newestMessageKey(widget.snapshot['messages']);
+    if (changed) _scrollToLatest();
+  }
+
   Future<void> _loadContacts() async {
     if (contactsLoading) return;
     if (mounted) setState(() => contactsLoading = true);
@@ -761,6 +826,8 @@ class _PatientPortalState extends State<PatientPortal>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    pageScroll.removeListener(_trackMessageScroll);
+    pageScroll.dispose();
     draft.dispose();
     super.dispose();
   }
@@ -777,18 +844,22 @@ class _PatientPortalState extends State<PatientPortal>
       ]),
       body: RefreshIndicator(
           onRefresh: _refreshAll,
-          child: ListView(padding: const EdgeInsets.all(16), children: [
-            if (widget.error != null) _notice(widget.error!),
-            if (actionError != null) _notice(actionError!),
-            if (tab == 0) _overview(),
-            if (tab == 1) _records(),
-            if (tab == 2) _care(),
-            if (tab == 3) _profile(),
-          ])),
+          child: ListView(
+              controller: pageScroll,
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (widget.error != null) _notice(widget.error!),
+                if (actionError != null) _notice(actionError!),
+                if (tab == 0) _overview(),
+                if (tab == 1) _records(),
+                if (tab == 2) _care(),
+                if (tab == 3) _profile(),
+              ])),
       bottomNavigationBar: NavigationBar(
           selectedIndex: tab,
           onDestinationSelected: (value) {
             setState(() => tab = value);
+            if (value == 2) _scrollToLatest(force: true);
             if (value == 3) _loadContacts();
           },
           destinations: const [
@@ -838,7 +909,8 @@ class _PatientPortalState extends State<PatientPortal>
         : readings;
     final food = list('food').cast<Map<String, dynamic>>();
     final bolus = list('bolus').cast<Map<String, dynamic>>();
-    final messages = list('messages').cast<Map<String, dynamic>>();
+    final messages =
+        chronologicalConversationMessages(widget.snapshot['messages']);
     final demo = widget.snapshot['demo'] as Map<String, dynamic>?;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Text('Hello, ${profile['fullName'] ?? 'Patient'}',
@@ -945,8 +1017,7 @@ class _PatientPortalState extends State<PatientPortal>
                           leading:
                               const Icon(Icons.vaccines_outlined, color: green),
                           title: Text('${item['recorded']} · ${item['meal']}'),
-                          subtitle: Text(
-                              'Carbs ${item['carbs']} · Pre-meal ${item['preMeal']}'),
+                          subtitle: Text('Carbs: ${insulinCarbsLabel(item)}'),
                           trailing: Text('${item['time'] ?? ''}')))
                       .toList())),
       _panel(
@@ -957,7 +1028,7 @@ class _PatientPortalState extends State<PatientPortal>
                   : 'Messaging opens when your doctor accepts.')
               : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(
-                      '${messages.first['from'] == 'patient' ? 'You' : doctor?['doctorProfile']?['fullName'] ?? 'Doctor'}: ${messages.first['text']}',
+                      '${messages.last['from'] == 'patient' ? 'You' : doctor?['doctorProfile']?['fullName'] ?? 'Doctor'}: ${messages.last['text']}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 8),
@@ -1219,8 +1290,7 @@ class _PatientPortalState extends State<PatientPortal>
                     subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                              '${item['carbs']} carbs · ${item['preMeal']} pre-meal'),
+                          Text('Carbs: ${insulinCarbsLabel(item)}'),
                           _syncStatus(item)
                         ]),
                     trailing: Text('${item['time']}'));
@@ -1535,7 +1605,7 @@ class _PatientPortalState extends State<PatientPortal>
         doctor?['doctorProfile'] as Map<String, dynamic>? ?? {};
     final connected = assignment?['status'] == 'accepted';
     final messages =
-        list('messages').cast<Map<String, dynamic>>().reversed.toList();
+        chronologicalConversationMessages(widget.snapshot['messages']);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _panel(
           'Your doctor',
@@ -1591,9 +1661,11 @@ class _PatientPortalState extends State<PatientPortal>
                       'from': 'patient',
                       'text': text,
                       'time': nowLabel,
+                      'sentAt': DateTime.now().toUtc().toIso8601String(),
                       'unread': true
                     });
                     draft.clear();
+                    _scrollToLatest(force: true);
                   },
                   icon: const Icon(Icons.send_outlined),
                   label: const Text('Send')),
@@ -1708,7 +1780,6 @@ class _ClinicalEntryDialog extends StatefulWidget {
 class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
   final first = TextEditingController();
   final second = TextEditingController();
-  final third = TextEditingController();
   String meal = 'Lunch';
   String mealStatus = 'planned';
   bool saving = false;
@@ -1718,14 +1789,16 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
   void dispose() {
     first.dispose();
     second.dispose();
-    third.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final firstNumber = double.tryParse(first.text);
     if (widget.kind == 'glucose' &&
-        (firstNumber == null || firstNumber < 20 || firstNumber > 600)) {
+        (firstNumber == null ||
+            !firstNumber.isFinite ||
+            firstNumber < 20 ||
+            firstNumber > 600)) {
       setState(() => error = 'Enter glucose between 20 and 600 mg/dL.');
       return;
     }
@@ -1735,12 +1808,19 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
       setState(() => error = 'Enter food and non-negative carbohydrates.');
       return;
     }
+    final carbsText = first.text.trim();
+    final bolusCarbs = carbsText.isEmpty ? null : double.tryParse(carbsText);
+    final bolusUnits = double.tryParse(second.text.trim());
     if (widget.kind == 'bolus' &&
-        ((firstNumber ?? -1) < 0 ||
-            (double.tryParse(second.text) ?? -1) < 20 ||
-            (double.tryParse(third.text) ?? -1) < 0)) {
-      setState(() => error =
-          'Enter valid carbohydrates, glucose, and administered units.');
+        ((bolusCarbs != null && (!bolusCarbs.isFinite || bolusCarbs < 0)) ||
+            (carbsText.isNotEmpty && bolusCarbs == null))) {
+      setState(() =>
+          error = 'Carbs must be a finite, non-negative number or left blank.');
+      return;
+    }
+    if (widget.kind == 'bolus' &&
+        (bolusUnits == null || !bolusUnits.isFinite || bolusUnits < 0)) {
+      setState(() => error = 'Enter a finite, non-negative insulin dose.');
       return;
     }
     setState(() {
@@ -1776,10 +1856,10 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                 ...common,
                 'patient': widget.patientName,
                 'meal': meal,
-                'carbs': '${first.text}g',
-                'preMeal': '${second.text} mg/dL',
+                if (bolusCarbs != null) 'carbsG': bolusCarbs,
                 'recommended': 'Doctor review',
-                'recorded': '${third.text} U',
+                'administeredUnits': bolusUnits,
+                'recorded': '$bolusUnits U',
                 'administeredAt': eventAt
               };
     try {
@@ -1839,7 +1919,7 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                       ? 'Glucose mg/dL'
                       : widget.kind == 'food'
                           ? 'Food items'
-                          : 'Carbs g')),
+                          : 'Carbs (g, optional)')),
           if (widget.kind != 'glucose') ...[
             const SizedBox(height: 12),
             TextField(
@@ -1847,17 +1927,8 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                 controller: second,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                    labelText: widget.kind == 'food'
-                        ? 'Carbs g'
-                        : 'Pre-meal glucose mg/dL'))
-          ],
-          if (widget.kind == 'bolus') ...[
-            const SizedBox(height: 12),
-            TextField(
-                enabled: !saving,
-                controller: third,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Bolus units'))
+                    labelText:
+                        widget.kind == 'food' ? 'Carbs g' : 'Bolus units'))
           ],
           if (error != null)
             Padding(
