@@ -24,7 +24,7 @@ export function Messages({ role, doctorId, currentPatient, doctorName, patientRe
     <>
       <PageHeader title="Messages" subtitle={isPatient ? 'Private conversation between you and your doctor.' : 'Clinical patient conversations and quick patient context.'} />
       {isPatient && assignmentStatus !== 'accepted' ? <section className="surface p-5 text-sm text-clinical-muted">Your doctor request is {assignmentStatus || 'pending'}. Messaging will be available after your doctor accepts it.</section> : patient ? (
-      <div className={`grid gap-5 ${isPatient ? 'xl:grid-cols-[1fr_300px]' : 'xl:grid-cols-[320px_1fr_300px]'}`}>
+      <div data-testid="messages-layout" className={`grid min-w-0 items-start gap-5 ${isPatient ? 'xl:grid-cols-[minmax(0,1fr)_300px]' : 'xl:grid-cols-[320px_minmax(0,1fr)_300px]'}`}>
         {!isPatient ? <ConversationList messages={visibleMessages} selected={activeSlug || ''} onSelect={(slug) => { setSelected(slug); setSearchParams({ patient: slug }); }} /> : null}
         <MessageThread patient={patient} doctorName={doctorName} messages={thread} draft={draft} setDraft={setDraft} onSend={send} canOpenPatient={!isPatient} viewerRole={role} />
         <PatientSnapshot patient={patient} canOpenPatient={!isPatient} />
