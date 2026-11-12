@@ -27,6 +27,11 @@ manual refresh, and app resume. An interrupted `syncing` operation becomes
 snapshot matches the record ID and authoritative clinical content. HTTP 401
 pauses uploads without deleting the session cache or outbox.
 
+Automatic synchronization after login, reconnect, polling, or resume may skip a
+pending operation's retry delay, but it never retries `failed` or `conflict`
+operations. Those remain blocked for review. Choosing **Retry** resets and sends
+only that selected operation; it does not unblock or send any other record.
+
 Outbox read-modify-write operations are serialized per account. The storage
 lock is released while HTTP is in flight, so a patient can keep saving records;
 completion handling reloads the latest queue and changes only the attempted

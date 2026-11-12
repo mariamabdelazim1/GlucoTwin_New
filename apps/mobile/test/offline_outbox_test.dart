@@ -35,6 +35,10 @@ List<Map<String, dynamic>> storedOutbox(MemoryStore store, String id) =>
         .map((value) => Map<String, dynamic>.from(value as Map))
         .toList();
 
+void writeStoredOutbox(
+        MemoryStore store, String id, List<Map<String, dynamic>> operations) =>
+    store.values['glucotwin.outbox.v1.$id'] = jsonEncode(operations);
+
 http.Response snapshotResponse(String patientId,
         {List<Map<String, dynamic>> glucose = const [],
         List<Map<String, dynamic>> bolus = const [],
@@ -139,7 +143,7 @@ void main() {
       'recordedAt': '2026-11-12T10:00:00+02:00'
     });
     await api.saveToken('synthetic-token');
-    await api.syncOutbox(force: true);
+    await api.syncOutbox(bypassRetryDelay: true);
     expect(posts, 1);
     final row = ((await api.localSnapshot())['glucose'] as List).single as Map;
     expect(row['syncState'], 'synced');
@@ -178,7 +182,7 @@ void main() {
       'recordedAt': '2026-11-12T08:00:00Z'
     });
     await api.saveToken('synthetic-token');
-    await api.syncOutbox(force: true);
+    await api.syncOutbox(bypassRetryDelay: true);
     final rows = ((await api.localSnapshot())['glucose'] as List).cast<Map>();
     expect(rows.singleWhere((row) => row['value'] == 120)['syncState'],
         'conflict');
@@ -243,7 +247,7 @@ void main() {
       'consumedCarbsG': 35
     });
     await api.saveToken('synthetic-token');
-    await api.syncOutbox(force: true);
+    await api.syncOutbox(bypassRetryDelay: true);
     expect(methods.where((value) => value == 'POST').length, 1);
     expect(methods.where((value) => value == 'PATCH').length, 1);
     final row = ((await api.localSnapshot())['food'] as List).single as Map;
@@ -463,6 +467,259 @@ void main() {
         0);
   });
 
+  test('same-account login resumes pending but leaves blocked records alone',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    final uploaded = <String>[];
+    final uploadCompleted = Completer<void>();
+    final snapshotCompleted = Completer<void>();
+    final client = MockClient((request) async {
+      if (request.url.path.endsWith('/auth/login')) {
+        return http.Response(
+            jsonEncode({
+              'token': 'renewed-token',
+              'account': account('patient-a'),
+            }),
+            200);
+      }
+      if (request.method == 'POST') {
+        uploaded.add((jsonDecode(request.body) as Map)['id'] as String);
+        uploadCompleted.complete();
+        return http.Response('{}', 200);
+      }
+      if (uploaded.isNotEmpty && !snapshotCompleted.isCompleted) {
+        snapshotCompleted.complete();
+      }
+      return snapshotResponse('patient-a');
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    await Future.wait([
+      api.queueAdd('glucose', {
+        'id': 'login-pending',
+        'patientSlug': 'patient-a',
+        'value': 151,
+        'recordedAt': '2026-11-12T13:00:00Z',
+      }),
+      api.queueAdd('glucose', {
+        'id': 'login-failed',
+        'patientSlug': 'patient-a',
+        'value': 152,
+        'recordedAt': '2026-11-12T13:01:00Z',
+      }),
+      api.queueAdd('glucose', {
+        'id': 'login-conflict',
+        'patientSlug': 'patient-a',
+        'value': 153,
+        'recordedAt': '2026-11-12T13:02:00Z',
+      }),
+    ]);
+    final operations = storedOutbox(store, 'patient-a');
+    operations.singleWhere(
+            (value) => value['recordId'] == 'login-pending')['nextAttemptAt'] =
+        '2099-01-01T00:00:00Z';
+    operations.singleWhere(
+        (value) => value['recordId'] == 'login-failed')['state'] = 'failed';
+    operations.singleWhere(
+        (value) => value['recordId'] == 'login-conflict')['state'] = 'conflict';
+    writeStoredOutbox(store, 'patient-a', operations);
+
+    await api.login('patient-a@example.test', 'password');
+    await uploadCompleted.future;
+    await snapshotCompleted.future;
+
+    expect(uploaded, ['login-pending']);
+    final remaining = storedOutbox(store, 'patient-a');
+    expect(remaining, hasLength(2));
+    expect(
+        remaining.singleWhere(
+            (value) => value['recordId'] == 'login-failed')['state'],
+        'failed');
+    expect(
+        remaining.singleWhere(
+            (value) => value['recordId'] == 'login-conflict')['state'],
+        'conflict');
+  });
+
+  test('bypassing retry delay never bypasses failed or conflict states',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    final uploaded = <String>[];
+    final client = MockClient((request) async {
+      if (request.method == 'POST') {
+        uploaded.add((jsonDecode(request.body) as Map)['id'] as String);
+        return http.Response('{}', 200);
+      }
+      return snapshotResponse('patient-a');
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    await Future.wait([
+      api.queueAdd('glucose', {
+        'id': 'delayed-pending',
+        'patientSlug': 'patient-a',
+        'value': 161,
+        'recordedAt': '2026-11-12T14:00:00Z',
+      }),
+      api.queueAdd('glucose', {
+        'id': 'blocked-failed',
+        'patientSlug': 'patient-a',
+        'value': 162,
+        'recordedAt': '2026-11-12T14:01:00Z',
+      }),
+      api.queueAdd('glucose', {
+        'id': 'blocked-conflict',
+        'patientSlug': 'patient-a',
+        'value': 163,
+        'recordedAt': '2026-11-12T14:02:00Z',
+      }),
+    ]);
+    final operations = storedOutbox(store, 'patient-a');
+    operations.singleWhere((value) => value['recordId'] == 'delayed-pending')[
+        'nextAttemptAt'] = '2099-01-01T00:00:00Z';
+    operations.singleWhere(
+        (value) => value['recordId'] == 'blocked-failed')['state'] = 'failed';
+    operations.singleWhere(
+            (value) => value['recordId'] == 'blocked-conflict')['state'] =
+        'conflict';
+    writeStoredOutbox(store, 'patient-a', operations);
+
+    await api.saveToken('synthetic-token');
+    await api.syncOutbox(bypassRetryDelay: true);
+
+    expect(uploaded, ['delayed-pending']);
+    final remaining = storedOutbox(store, 'patient-a');
+    expect(remaining.map((value) => value['recordId']),
+        containsAll(['blocked-failed', 'blocked-conflict']));
+    expect(remaining.map((value) => value['state']),
+        containsAll(['failed', 'conflict']));
+  });
+
+  test('explicit retry sends only the selected operation and keeps its version',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    final requests = <String>[];
+    final client = MockClient((request) async {
+      if (request.method == 'PATCH') {
+        requests.add(request.url.path);
+        final body = jsonDecode(request.body) as Map;
+        expect(body['expectedVersion'], 3);
+        expect(body['consumedCarbsG'], 35);
+        expect(body['mutationId'], 'selected-meal-retry');
+        return http.Response(jsonEncode({'meal': {}}), 200);
+      }
+      if (request.method == 'POST') {
+        fail('An unrelated blocked record was uploaded.');
+      }
+      return snapshotResponse('patient-a', food: [
+        {
+          'id': 'server-meal',
+          'meal': 'Lunch',
+          'items': 'Rice',
+          'carbs': '40g',
+          'announcedCarbsG': 40,
+          'consumedCarbsG': 35,
+          'status': 'eaten',
+          'plannedEatingAt': '2026-11-12T15:00:00Z',
+          'actualEatingAt': '2026-11-12T15:30:00Z',
+          'version': 4,
+        }
+      ]);
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    await Future.wait([
+      api.queueAdd('glucose', {
+        'id': 'unrelated-failed',
+        'patientSlug': 'patient-a',
+        'value': 171,
+        'recordedAt': '2026-11-12T15:00:00Z',
+      }),
+      api.queueAdd('glucose', {
+        'id': 'unrelated-conflict',
+        'patientSlug': 'patient-a',
+        'value': 172,
+        'recordedAt': '2026-11-12T15:01:00Z',
+      }),
+      api.queueMealUpdate('server-meal', {
+        'expectedVersion': 3,
+        'mutationId': 'selected-meal-retry',
+        'status': 'eaten',
+        'actualEatingAt': '2026-11-12T15:30:00Z',
+        'consumedCarbsG': 35,
+      }),
+    ]);
+    final operations = storedOutbox(store, 'patient-a');
+    operations.singleWhere(
+        (value) => value['recordId'] == 'unrelated-failed')['state'] = 'failed';
+    operations.singleWhere(
+            (value) => value['recordId'] == 'unrelated-conflict')['state'] =
+        'conflict';
+    operations.singleWhere(
+            (value) => value['operationId'] == 'selected-meal-retry')['state'] =
+        'conflict';
+    writeStoredOutbox(store, 'patient-a', operations);
+
+    await api.saveToken('synthetic-token');
+    await api.retry('selected-meal-retry');
+
+    expect(requests, ['/api/food/server-meal']);
+    final remaining = storedOutbox(store, 'patient-a');
+    expect(remaining, hasLength(2));
+    expect(remaining.map((value) => value['state']),
+        containsAll(['failed', 'conflict']));
+  });
+
+  test('blocked meal creation keeps its dependent confirmation blocked',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    var clinicalRequests = 0;
+    final client = MockClient((request) async {
+      if (request.method == 'POST' || request.method == 'PATCH') {
+        clinicalRequests++;
+      }
+      return snapshotResponse('patient-a');
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    await api.queueAdd('food', {
+      'id': 'blocked-meal',
+      'patientSlug': 'patient-a',
+      'meal': 'Lunch',
+      'items': 'Rice',
+      'carbs': '40g',
+      'status': 'planned',
+      'plannedEatingAt': '2026-11-12T16:00:00Z',
+    });
+    await api.queueMealUpdate('blocked-meal', {
+      'expectedVersion': null,
+      'mutationId': 'blocked-confirmation',
+      'status': 'eaten',
+      'actualEatingAt': '2026-11-12T16:30:00Z',
+      'consumedCarbsG': 40,
+    });
+    final operations = storedOutbox(store, 'patient-a');
+    operations.singleWhere(
+            (value) => value['operationId'] == 'op-blocked-meal')['state'] =
+        'conflict';
+    writeStoredOutbox(store, 'patient-a', operations);
+
+    await api.saveToken('synthetic-token');
+    await api.syncOutbox(bypassRetryDelay: true);
+
+    expect(clinicalRequests, 0);
+    final remaining = storedOutbox(store, 'patient-a');
+    expect(remaining, hasLength(2));
+    expect(
+        remaining.singleWhere((value) =>
+            value['operationId'] == 'blocked-confirmation')['dependsOn'],
+        'op-blocked-meal');
+  });
+
   test('401 stops the worker and successful same-account login resumes it',
       () async {
     final store = MemoryStore();
@@ -512,7 +769,7 @@ void main() {
       }),
     ]);
     await api.saveToken('expired-token');
-    await api.syncOutbox(force: true);
+    await api.syncOutbox(bypassRetryDelay: true);
     expect(clinicalRequests, 1);
     final paused = storedOutbox(store, 'patient-a');
     expect(paused, hasLength(2));
@@ -520,7 +777,7 @@ void main() {
         containsAll(['auth-one', 'auth-two']));
     expect(paused.first['payload']['value'], 131);
 
-    await api.syncOutbox(force: true);
+    await api.syncOutbox(bypassRetryDelay: true);
     expect(clinicalRequests, 1);
 
     await api.login('patient-a@example.test', 'password');

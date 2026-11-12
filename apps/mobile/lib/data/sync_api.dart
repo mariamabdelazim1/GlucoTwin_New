@@ -283,7 +283,7 @@ class SyncApi {
       _serverSnapshot =
           raw == null ? {} : Map<String, dynamic>.from(jsonDecode(raw) as Map);
     }
-    unawaited(syncOutbox(force: true));
+    unawaited(syncOutbox(bypassRetryDelay: true));
     return account;
   }
 
@@ -292,7 +292,7 @@ class SyncApi {
         method: 'POST', data: {'account': account});
     final saved = Map<String, dynamic>.from(result['account'] as Map);
     await _activateSession(result['token'] as String, saved);
-    unawaited(syncOutbox(force: true));
+    unawaited(syncOutbox(bypassRetryDelay: true));
     return saved;
   }
 
@@ -440,10 +440,11 @@ class SyncApi {
     });
     if (!found) return;
     onLocalChange?.call();
-    await syncOutbox(force: true);
+    await syncOutbox(bypassRetryDelay: true, onlyOperationId: operationId);
   }
 
-  Future<void> syncOutbox({bool force = false}) async {
+  Future<void> syncOutbox(
+      {bool bypassRetryDelay = false, String? onlyOperationId}) async {
     final id = currentPatientId;
     final workerToken = token;
     final workerRevision = _sessionRevision;
@@ -452,8 +453,8 @@ class SyncApi {
     final attemptedIds = <String>{};
     try {
       while (_ownsSession(id, workerToken, workerRevision) && !authPaused) {
-        final op = await _claimNextOperation(
-            id, workerToken, workerRevision, force, attemptedIds);
+        final op = await _claimNextOperation(id, workerToken, workerRevision,
+            bypassRetryDelay, onlyOperationId, attemptedIds);
         if (op == null) break;
         attemptedIds.add(op.operationId);
         onLocalChange?.call();
@@ -472,6 +473,19 @@ class SyncApi {
               throw ApiException(
                   'Waiting for the planned meal to be confirmed by the server.',
                   network: true);
+            }
+            if (op.payload['expectedVersion'] == null) {
+              final persisted = await _persistExpectedVersion(
+                  id,
+                  workerToken,
+                  workerRevision,
+                  op.operationId,
+                  requestPayload['expectedVersion'] as int);
+              if (!persisted) {
+                await _restoreInterruptedOperation(id, op.operationId);
+                break;
+              }
+              op.payload['expectedVersion'] = requestPayload['expectedVersion'];
             }
             await request('food/${Uri.encodeComponent(op.recordId)}',
                 method: 'PATCH',
@@ -515,23 +529,33 @@ class SyncApi {
       if (token != null &&
           !authPaused &&
           (currentPatientId != id || _sessionRevision != workerRevision)) {
-        scheduleMicrotask(() => syncOutbox(force: force));
+        scheduleMicrotask(syncOutbox);
       }
     }
   }
 
-  Future<OutboxOperation?> _claimNextOperation(String id, String sessionToken,
-      int revision, bool force, Set<String> attemptedIds) async {
+  Future<OutboxOperation?> _claimNextOperation(
+      String id,
+      String sessionToken,
+      int revision,
+      bool bypassRetryDelay,
+      String? onlyOperationId,
+      Set<String> attemptedIds) async {
     final result = await _withOwnedOutbox<OutboxOperation?>(
         id, sessionToken, revision, () async {
       final operations = await _readOutboxUnlocked(id);
       for (final op in operations) {
+        if (onlyOperationId != null && op.operationId != onlyOperationId) {
+          continue;
+        }
         if (attemptedIds.contains(op.operationId)) continue;
-        if (!force && (op.state == 'failed' || op.state == 'conflict')) {
+        if (op.state == 'failed' || op.state == 'conflict') {
           continue;
         }
         final next = DateTime.tryParse(op.nextAttemptAt ?? '');
-        if (!force && next != null && next.isAfter(DateTime.now().toUtc())) {
+        if (!bypassRetryDelay &&
+            next != null &&
+            next.isAfter(DateTime.now().toUtc())) {
           continue;
         }
         if (op.dependsOn != null &&
@@ -555,6 +579,23 @@ class SyncApi {
         await _withOwnedOutbox<bool>(id, sessionToken, revision, () async {
       final latest = await _readOutboxUnlocked(id);
       latest.removeWhere((value) => value.operationId == operationId);
+      await _writeOutboxUnlocked(id, latest);
+      return true;
+    });
+    return result ?? false;
+  }
+
+  Future<bool> _persistExpectedVersion(String id, String sessionToken,
+      int revision, String operationId, int expectedVersion) async {
+    final result =
+        await _withOwnedOutbox<bool>(id, sessionToken, revision, () async {
+      final latest = await _readOutboxUnlocked(id);
+      final stored =
+          latest.where((value) => value.operationId == operationId).firstOrNull;
+      if (stored == null) return false;
+      final existing = stored.payload['expectedVersion'];
+      if (existing != null && existing != expectedVersion) return false;
+      stored.payload['expectedVersion'] = expectedVersion;
       await _writeOutboxUnlocked(id, latest);
       return true;
     });
