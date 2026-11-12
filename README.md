@@ -18,10 +18,19 @@ docs/                  Architecture and project documentation
 
 ## Local development
 
-Install the Node workspaces from the repository root:
+Copy the local environment example and start PostgreSQL:
+
+```bash
+cp .env.example .env
+docker compose up -d postgres
+```
+
+Install the Node workspaces, migrate the database, and explicitly seed development demo data:
 
 ```bash
 npm install
+npm run db:migrate
+npm run db:seed
 ```
 
 Run the API and website in separate terminals:
@@ -38,7 +47,7 @@ flutter pub get
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8787
 ```
 
-The Python prediction service is intentionally isolated from the clients. See `services/prediction/README.md` for its model contract and current status.
+The API requires PostgreSQL and fails clearly if `DATABASE_URL`, connectivity, or migrations are missing. It does not fall back to the former JSON store. The Python prediction service remains isolated from the clients; see `services/prediction/README.md` for its model contract and current status.
 
 ## Deployment
 

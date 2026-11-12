@@ -6,12 +6,14 @@ import { Avatar } from '../ui/Avatar';
 
 type Sort = 'rank' | 'rating' | 'experience';
 
-export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, selectLabel = 'Choose this doctor' }: {
+export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, selectLabel = 'Choose this doctor', selectedLabel = 'Selected doctor', disabled = false }: {
   doctors: Account[];
   ratings: DoctorRating[];
   selectedId?: string;
   onSelect?: (id: string) => void;
   selectLabel?: string;
+  selectedLabel?: string;
+  disabled?: boolean;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -48,7 +50,7 @@ export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, select
             <div className="flex gap-2"><BookOpen size={17} className="shrink-0 text-clinical-primary" /><span>{profile.papers.length ? profile.papers.join(', ') : 'No papers added'}</span></div>
             {(profile.documents ?? []).map((document) => <a key={document.id} href={document.dataUrl} target="_blank" rel="noreferrer" className="block font-semibold text-clinical-primary">{document.kind === 'certificate' ? 'Certificate' : 'Paper'}: {document.name}</a>)}
           </div> : null}
-          {onSelect ? <button type="button" onClick={() => onSelect(doctor.id)} className={`focus-ring mt-4 w-full rounded-md px-3 py-2 text-sm font-semibold ${selectedId === doctor.id ? 'bg-clinical-primary text-white' : 'border border-clinical-border text-clinical-primary'}`}>{selectedId === doctor.id ? 'Selected doctor' : selectLabel}</button> : null}
+          {onSelect ? <button type="button" disabled={disabled || selectedId === doctor.id && selectedLabel !== 'Retry request to this doctor'} onClick={() => onSelect(doctor.id)} className={`focus-ring mt-4 w-full rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50 ${selectedId === doctor.id ? 'bg-clinical-primary text-white' : 'border border-clinical-border text-clinical-primary'}`}>{selectedId === doctor.id ? selectedLabel : selectLabel}</button> : null}
         </article>;
       })}
       {ordered.length === 0 ? <p className="rounded-md border border-clinical-border p-4 text-sm text-clinical-muted">No doctors match this search.</p> : null}

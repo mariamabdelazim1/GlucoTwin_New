@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { Check, FilePlus2, Save, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { Account, DoctorProfileData, DoctorRating, PatientProfile } from '../types';
 import { Avatar } from '../components/ui/Avatar';
 import { DoctorDirectory } from '../components/doctors/DoctorDirectory';
 import { PageHeader } from '../components/ui/PageHeader';
+import { EmergencyContacts } from '../components/profile/EmergencyContacts';
 
 const field = 'focus-ring mt-1 w-full rounded-md border border-clinical-border bg-white px-3 py-2 font-normal';
 const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
@@ -15,13 +17,14 @@ const readFile = (file: File) => new Promise<string>((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
-export function DoctorProfile({ account, accounts, ratings, onSave }: { account: Account; accounts: Account[]; ratings: DoctorRating[]; onSave: (account: Account) => void }) {
+export function DoctorProfile({ account, accounts, ratings, onSave }: { account: Account; accounts: Account[]; ratings: DoctorRating[]; onSave: (account: Account) => Promise<string | null> }) {
   const isDoctor = account.role === 'doctor';
   const [doctor, setDoctor] = useState<DoctorProfileData>(account.doctorProfile ?? { fullName: '', specialty: '', yearsExperience: '', medicalSchool: '', qualifications: '', bio: '', certificates: [], papers: [] });
   const [certificateText, setCertificateText] = useState(account.doctorProfile?.certificates.join('\n') ?? '');
   const [paperText, setPaperText] = useState(account.doctorProfile?.papers.join('\n') ?? '');
   const [patient, setPatient] = useState<PatientProfile>(account.patientProfile ?? { fullName: '', age: '', weight: '', height: '', diabetesType: '', insulinPlan: '', diagnosisYear: '', medications: '', allergies: '', emergencyContact: '', selectedDoctorId: '' });
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const name = isDoctor ? doctor.fullName : patient.fullName;
   const upload = async (event: ChangeEvent<HTMLInputElement>, kind: 'photo' | 'certificate' | 'paper') => {
@@ -41,9 +44,13 @@ export function DoctorProfile({ account, accounts, ratings, onSave }: { account:
       setError('');
     } catch { setError('The selected file could not be opened.'); }
   };
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    onSave(isDoctor ? { ...account, doctorProfile: { ...doctor, certificates: lines(certificateText), papers: lines(paperText) } } : { ...account, patientProfile: patient });
+    if (saving) return;
+    setSaving(true); setSaved(false); setError('');
+    const failure = await onSave(isDoctor ? { ...account, doctorProfile: { ...doctor, certificates: lines(certificateText), papers: lines(paperText) } } : { ...account, patientProfile: { ...patient, selectedDoctorId: account.patientProfile?.selectedDoctorId || '' } });
+    setSaving(false);
+    if (failure) { setError(failure); return; }
     setSaved(true);
     window.setTimeout(() => setSaved(false), 2000);
   };
@@ -77,16 +84,16 @@ export function DoctorProfile({ account, accounts, ratings, onSave }: { account:
             <label className="text-sm font-semibold">Insulin plan<input value={patient.insulinPlan} onChange={(event) => setPatient({ ...patient, insulinPlan: event.target.value })} className={field} /></label>
             <label className="text-sm font-semibold sm:col-span-2">Medications<input value={patient.medications} onChange={(event) => setPatient({ ...patient, medications: event.target.value })} className={field} /></label>
             <label className="text-sm font-semibold">Allergies<input value={patient.allergies} onChange={(event) => setPatient({ ...patient, allergies: event.target.value })} className={field} /></label>
-            <label className="text-sm font-semibold">Emergency contact<input value={patient.emergencyContact} onChange={(event) => setPatient({ ...patient, emergencyContact: event.target.value })} className={field} /></label>
           </>}
         </div>
+        {!isDoctor ? <EmergencyContacts legacyValue={patient.emergencyContact} /> : null}
         {isDoctor ? <div className="border-t border-clinical-border pt-5">
           <h3 className="font-semibold">Certificate and paper files</h3>
           <div className="mt-3 flex flex-wrap gap-2">{(['certificate', 'paper'] as const).map((kind) => <label key={kind} className="focus-ring inline-flex cursor-pointer items-center gap-2 rounded-md border border-clinical-border px-3 py-2 text-sm font-semibold text-clinical-primary"><FilePlus2 size={16} /> Add {kind}<input className="sr-only" type="file" accept=".pdf,image/*" multiple onChange={(event) => void upload(event, kind)} /></label>)}</div>
           <ul className="mt-4 space-y-2">{(doctor.documents ?? []).map((document) => <li key={document.id} className="flex items-center justify-between gap-3 rounded-md bg-clinical-bg px-3 py-2 text-sm"><a href={document.dataUrl} target="_blank" rel="noreferrer" className="min-w-0 truncate font-semibold text-clinical-primary">{document.name}</a><button type="button" onClick={() => setDoctor({ ...doctor, documents: doctor.documents?.filter((item) => item.id !== document.id) })} aria-label={`Remove ${document.name}`} className="focus-ring text-clinical-critical"><Trash2 size={17} /></button></li>)}</ul>
-        </div> : <div className="border-t border-clinical-border pt-5"><h3 className="mb-3 font-semibold">Your doctor</h3><DoctorDirectory doctors={accounts.filter((item) => item.role === 'doctor' && item.doctorProfile)} ratings={ratings} selectedId={patient.selectedDoctorId} onSelect={(id) => setPatient({ ...patient, selectedDoctorId: id })} /></div>}
+        </div> : <div className="border-t border-clinical-border pt-5"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-semibold">Your doctor</h3><Link to="/patient/doctors" className="text-sm font-semibold text-clinical-primary">Find or change doctor</Link></div><DoctorDirectory doctors={accounts.filter((item) => item.role === 'doctor' && item.doctorProfile)} ratings={ratings} selectedId={account.patientProfile?.selectedDoctorId} /></div>}
         {error ? <p role="alert" className="text-sm text-clinical-critical">{error}</p> : null}
-        <button className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white">{saved ? <Check size={18} /> : <Save size={18} />}{saved ? 'Saved' : 'Save profile'}</button>
+        <button disabled={saving} className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white disabled:opacity-50">{saved ? <Check size={18} /> : <Save size={18} />}{saving ? 'Saving…' : saved ? 'Saved' : 'Save profile'}</button>
       </form>
     </div>
   </>;

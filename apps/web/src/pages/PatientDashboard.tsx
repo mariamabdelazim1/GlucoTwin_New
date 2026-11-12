@@ -11,6 +11,7 @@ import { MetricCard } from '../components/ui/MetricCard';
 import { PageHeader } from '../components/ui/PageHeader';
 import type { BolusEntry, FoodEntry, Message, Patient, PatientProfile } from '../types';
 import type { GlucoseEntry } from '../utils/sync';
+import { updateMeal } from '../utils/sync';
 
 export function PatientDashboard({
   focusFood = false,
@@ -44,8 +45,9 @@ export function PatientDashboard({
   const patientGlucose = glucoseEntries.filter((entry) => entry.patientSlug === patient.slug).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
   const [draft, setDraft] = useState('');
   const [botReply, setBotReply] = useState(`Ask a question here. Your message will also be sent to ${doctorName}.`);
-  const [mealForm, setMealForm] = useState({ meal: 'Lunch', items: '', carbs: '', glucose: '' });
-  const [bolusForm, setBolusForm] = useState({ meal: 'Lunch', carbs: '', preMeal: '', recorded: '' });
+  const [mealForm, setMealForm] = useState({ meal: 'Lunch', items: '', carbs: '', glucose: '', status: 'planned' as 'planned' | 'eaten' });
+  const [bolusForm, setBolusForm] = useState({ meal: 'Lunch', carbs: '', recorded: '' });
+  const [bolusError, setBolusError] = useState('');
   const [glucoseValue, setGlucoseValue] = useState('');
 
   const sendToDoctor = () => {
@@ -63,6 +65,7 @@ export function PatientDashboard({
         text,
         time: 'Now',
         unread: true,
+        sentAt: new Date().toISOString(), syncState: 'pending', syncAttempts: 0,
       },
     ]);
     setBotReply(`Your message was recorded for ${doctorName}.`);
@@ -73,6 +76,7 @@ export function PatientDashboard({
 
   const addFood = () => {
     if (!mealForm.items.trim() || !mealForm.carbs.trim()) return;
+    const eventAt = new Date().toISOString();
     setFoodEntries((current) => [
       {
         id: crypto.randomUUID(),
@@ -83,15 +87,31 @@ export function PatientDashboard({
         items: mealForm.items.trim(),
         carbs: `${mealForm.carbs.trim()}g`,
         impact: mealForm.glucose.trim() ? `${mealForm.glucose.trim()} mg/dL noted` : 'Pending CGM impact',
-        status: 'Recorded',
+        status: mealForm.status,
+        plannedEatingAt: eventAt,
+        actualEatingAt: mealForm.status === 'eaten' ? eventAt : null,
+        announcedCarbsG: Number(mealForm.carbs),
+        consumedCarbsG: mealForm.status === 'eaten' ? Number(mealForm.carbs) : null,
+        ...(mealForm.status === 'eaten' ? { confirmAnnouncedAmount: true } : {}),
+        syncState: 'pending', syncAttempts: 0,
       },
       ...current,
     ]);
-    setMealForm({ meal: 'Lunch', items: '', carbs: '', glucose: '' });
+    setMealForm({ meal: 'Lunch', items: '', carbs: '', glucose: '', status: 'planned' });
   };
 
   const addBolus = () => {
-    if (!bolusForm.carbs.trim() || !bolusForm.preMeal.trim() || !bolusForm.recorded.trim()) return;
+    const units = Number(bolusForm.recorded);
+    const carbsText = bolusForm.carbs.trim();
+    const carbsG = carbsText === '' ? null : Number(carbsText);
+    if (!bolusForm.recorded.trim() || !Number.isFinite(units) || units < 0) {
+      setBolusError('Enter a finite, non-negative insulin dose.');
+      return;
+    }
+    if (carbsG !== null && (!Number.isFinite(carbsG) || carbsG < 0)) {
+      setBolusError('Carbs must be a finite, non-negative number or left blank.');
+      return;
+    }
     setBolusEntries((current) => [
       {
         id: crypto.randomUUID(),
@@ -99,21 +119,36 @@ export function PatientDashboard({
         patient: patient.name,
         time: currentTime(),
         meal: bolusForm.meal,
-        carbs: `${bolusForm.carbs.trim()}g`,
-        preMeal: `${bolusForm.preMeal.trim()} mg/dL`,
+        carbs: carbsG === null ? 'Not provided' : `${carbsG}g`,
+        carbsG,
         recommended: 'Doctor review',
-        recorded: `${bolusForm.recorded.trim()} U`,
+        administeredUnits: units,
+        recorded: `${units} U`,
+        administeredAt: new Date().toISOString(),
+        syncState: 'pending', syncAttempts: 0,
       },
       ...current,
     ]);
-    setBolusForm({ meal: 'Lunch', carbs: '', preMeal: '', recorded: '' });
+    setBolusForm({ meal: 'Lunch', carbs: '', recorded: '' });
+    setBolusError('');
+  };
+
+  const changeMeal = async (entry: FoodEntry, status: 'eaten' | 'cancelled') => {
+    if (!entry.version) return;
+    const result = await updateMeal(entry.id, {
+      expectedVersion: entry.version,
+      mutationId: crypto.randomUUID(),
+      status,
+      ...(status === 'eaten' ? { actualEatingAt: new Date().toISOString(), confirmAnnouncedAmount: true } : {}),
+    });
+    setFoodEntries((current) => current.map((item) => item.id === entry.id ? result.meal : item));
   };
 
   const addGlucose = () => {
     const value = Number(glucoseValue);
     if (!Number.isFinite(value) || value < 20 || value > 600) return;
     const now = new Date();
-    setGlucoseEntries((current) => [{ id: crypto.randomUUID(), patientSlug: patient.slug, value, time: currentTime(), recordedAt: now.toISOString() }, ...current]);
+    setGlucoseEntries((current) => [{ id: crypto.randomUUID(), patientSlug: patient.slug, value, time: currentTime(), recordedAt: now.toISOString(), syncState: 'pending', syncAttempts: 0 }, ...current]);
     setGlucoseValue('');
   };
 
@@ -148,6 +183,7 @@ export function PatientDashboard({
                 <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
               </select>
               <input value={mealForm.items} onChange={(event) => setMealForm({ ...mealForm, items: event.target.value })} placeholder="Food items" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
+              <select value={mealForm.status} onChange={(event) => setMealForm({ ...mealForm, status: event.target.value as 'planned' | 'eaten' })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm"><option value="planned">Plan for later</option><option value="eaten">Already eaten</option></select>
               <div className="grid grid-cols-2 gap-2">
                 <input value={mealForm.carbs} onChange={(event) => setMealForm({ ...mealForm, carbs: event.target.value })} inputMode="numeric" placeholder="Carbs g" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
                 <input value={mealForm.glucose} onChange={(event) => setMealForm({ ...mealForm, glucose: event.target.value })} inputMode="numeric" placeholder="Glucose" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
@@ -168,6 +204,7 @@ export function PatientDashboard({
                   <span className="rounded-md bg-amber-50 px-2 py-1 text-clinical-warning">{entry.impact}</span>
                   <span className="rounded-md bg-emerald-50 px-2 py-1 text-clinical-success">{entry.status}</span>
                 </div>
+                {entry.status === 'planned' && entry.version ? <div className="mt-2 flex gap-2"><button onClick={() => void changeMeal(entry, 'eaten')} className="rounded bg-clinical-primary px-2 py-1 text-xs font-semibold text-white">Mark eaten</button><button onClick={() => void changeMeal(entry, 'cancelled')} className="rounded border border-clinical-border px-2 py-1 text-xs font-semibold">Cancel</button></div> : null}
               </article>
             ))}
           </div>
@@ -176,18 +213,18 @@ export function PatientDashboard({
         <section className="space-y-6">
           <section className="surface p-5">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Syringe size={20} /> Manual bolus log</h2>
-            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
               <select value={bolusForm.meal} onChange={(event) => setBolusForm({ ...bolusForm, meal: event.target.value })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm">
                 <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
               </select>
-              <input value={bolusForm.carbs} onChange={(event) => setBolusForm({ ...bolusForm, carbs: event.target.value })} inputMode="numeric" placeholder="Carbs g" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
-              <input value={bolusForm.preMeal} onChange={(event) => setBolusForm({ ...bolusForm, preMeal: event.target.value })} inputMode="numeric" placeholder="Pre-meal glucose" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
+              <input aria-label="Carbs (g, optional)" value={bolusForm.carbs} onChange={(event) => setBolusForm({ ...bolusForm, carbs: event.target.value })} inputMode="decimal" placeholder="Carbs (g, optional)" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
               <input value={bolusForm.recorded} onChange={(event) => setBolusForm({ ...bolusForm, recorded: event.target.value })} inputMode="decimal" placeholder="Bolus units" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
               <button onClick={addBolus} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2 text-sm font-semibold text-white hover:bg-clinical-primaryDark"><Plus size={16} /> Log</button>
             </div>
+            {bolusError ? <p role="alert" className="mt-2 text-sm text-red-700">{bolusError}</p> : null}
             <div className="mt-4 divide-y divide-clinical-border rounded-lg border border-clinical-border">
               {patientBolus.slice(0, 3).map((entry) => (
-                <div className="grid gap-2 p-3 text-sm md:grid-cols-5" key={entry.id}><strong>{entry.time}</strong><span>{entry.meal}</span><span>Carbs: {entry.carbs}</span><span>Pre-meal: {entry.preMeal}</span><span>Recorded: {entry.recorded}</span></div>
+                <div className="grid gap-2 p-3 text-sm md:grid-cols-4" key={entry.id}><strong>{entry.time}</strong><span>{entry.meal}</span><span>Carbs: {entry.carbs || 'Not provided'}</span><span>Recorded: {entry.recorded}</span></div>
               ))}
             </div>
           </section>

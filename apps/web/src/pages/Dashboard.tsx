@@ -5,8 +5,9 @@ import { StatCard } from '../components/ui/StatCard';
 import { PatientTable } from '../components/patients/PatientTable';
 import { Avatar } from '../components/ui/Avatar';
 import type { BolusEntry, FoodEntry, Message, Patient } from '../types';
+import { chronologicalMessages } from '../utils/messages';
 
-export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, bolusEntries, messages, acceptedPatientSlugs, patientRequests, onAcceptPatient, onDeclinePatient }: { doctorId: string; doctorName: string; patientRecords: Patient[]; foodEntries: FoodEntry[]; bolusEntries: BolusEntry[]; messages: Message[]; acceptedPatientSlugs: string[]; patientRequests: string[]; onAcceptPatient: (slug: string) => void; onDeclinePatient: (slug: string) => void }) {
+export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, bolusEntries, messages, acceptedPatientSlugs, patientRequests, assignmentActions, onAcceptPatient, onDeclinePatient }: { doctorId: string; doctorName: string; patientRecords: Patient[]; foodEntries: FoodEntry[]; bolusEntries: BolusEntry[]; messages: Message[]; acceptedPatientSlugs: string[]; patientRequests: string[]; assignmentActions: Record<string, { state: 'pending' | 'success' | 'error'; message: string }>; onAcceptPatient: (slug: string) => Promise<void>; onDeclinePatient: (slug: string) => Promise<void> }) {
   const assigned = patientRecords.filter((patient) => acceptedPatientSlugs.includes(patient.slug));
   const unstable = assigned.filter((patient) => patient.status !== 'In Range' || patient.trend === 'Rapidly rising' || patient.trend === 'Rapidly falling');
   const requests = patientRecords.filter((patient) => patientRequests.includes(patient.slug));
@@ -25,13 +26,14 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
       </div>
       <section className="surface mt-6 p-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold"><UserPlus size={19} /> New Patient Requests <span className="text-sm text-clinical-muted">({requests.length})</span></h2>
+        {Object.entries(assignmentActions).filter(([key]) => key.startsWith(`${doctorId}:`)).map(([key, action]) => <p key={key} role={action.state === 'error' ? 'alert' : 'status'} className={`mt-3 rounded-md border p-3 text-sm ${action.state === 'error' ? 'border-red-200 bg-red-50 text-red-700' : action.state === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{action.message}</p>)}
         <div className="mt-4 space-y-3">
           {requests.length === 0 ? <p className="text-sm text-clinical-muted">No pending requests.</p> : requests.map((patient) => (
             <div key={patient.slug} className="flex flex-wrap items-center justify-between gap-3 border-b border-clinical-border pb-3 last:border-0 last:pb-0">
               <div><strong>{patient.name}</strong><p className="text-sm text-clinical-muted">{patient.age} years · {patient.diabetesType}</p></div>
               <div className="flex gap-2">
-                <button onClick={() => onDeclinePatient(patient.slug)} className="focus-ring inline-flex items-center gap-1 rounded-md border border-clinical-border px-3 py-2 text-sm font-semibold"><X size={16} /> Decline</button>
-                <button onClick={() => onAcceptPatient(patient.slug)} className="focus-ring inline-flex items-center gap-1 rounded-md bg-clinical-primary px-3 py-2 text-sm font-semibold text-white"><Check size={16} /> Accept</button>
+                <button disabled={assignmentActions[`${doctorId}:${patient.slug}`]?.state === 'pending'} onClick={() => void onDeclinePatient(patient.slug)} className="focus-ring inline-flex items-center gap-1 rounded-md border border-clinical-border px-3 py-2 text-sm font-semibold disabled:opacity-50"><X size={16} /> Decline</button>
+                <button disabled={assignmentActions[`${doctorId}:${patient.slug}`]?.state === 'pending'} onClick={() => void onAcceptPatient(patient.slug)} className="focus-ring inline-flex items-center gap-1 rounded-md bg-clinical-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={16} /> Accept</button>
               </div>
             </div>
           ))}
@@ -45,7 +47,7 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
         <section className="surface p-4">
           <h2 className="text-lg font-semibold">Recent Messages</h2>
           <div className="mt-4 space-y-3">
-            {[...patientMessages].reverse().slice(0, 3).map((message) => (
+            {chronologicalMessages(patientMessages).reverse().slice(0, 3).map((message) => (
               <Link to={`/messages?patient=${message.patientSlug}`} key={message.id} className="focus-ring flex gap-3 rounded-lg border border-clinical-border p-3 hover:bg-emerald-50">
                 <Avatar label={message.avatar} />
                 <span className="min-w-0 flex-1"><strong className="text-sm">{message.patient}</strong><span className="ml-2 text-xs text-clinical-muted">{message.time}</span><p className="truncate text-sm text-clinical-muted">{message.text}</p></span>
@@ -84,7 +86,7 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
               {recentBolus.map((entry) => (
                 <div key={entry.id} className="rounded-md bg-clinical-bg p-3 text-sm">
                   <strong>{entry.patient}</strong> recorded {entry.recorded} at {entry.time}
-                  <p className="mt-1 text-clinical-muted">{entry.meal} · {entry.carbs} carbs · pre-meal {entry.preMeal}</p>
+                  <p className="mt-1 text-clinical-muted">{entry.meal} · Carbs: {entry.carbs || 'Not provided'}</p>
                 </div>
               ))}
             </div>

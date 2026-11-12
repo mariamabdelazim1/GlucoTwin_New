@@ -58,9 +58,12 @@ export interface Account {
 }
 
 export interface CareAssignment {
+  id?: string;
   patientId: string;
   doctorId: string;
   status: 'pending' | 'accepted' | 'declined';
+  requestedAt?: string;
+  respondedAt?: string | null;
 }
 
 export interface DoctorRating {
@@ -101,6 +104,11 @@ export interface Message {
   text: string;
   time: string;
   unread?: boolean;
+  sentAt?: string;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
 }
 
 export interface FoodEntry {
@@ -113,6 +121,17 @@ export interface FoodEntry {
   carbs: string;
   impact: string;
   status: string;
+  announcedCarbsG?: number | null;
+  consumedCarbsG?: number | null;
+  plannedEatingAt?: string;
+  actualEatingAt?: string | null;
+  version?: number;
+  updatedAt?: string;
+  confirmAnnouncedAmount?: boolean;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
 }
 
 export interface BolusEntry {
@@ -122,9 +141,17 @@ export interface BolusEntry {
   time: string;
   meal: string;
   carbs: string;
-  preMeal: string;
+  carbsG?: number | null;
+  /** Historical compatibility context. New insulin logs do not collect this. */
+  preMeal?: string;
   recommended: string;
   recorded: string;
+  administeredUnits?: number;
+  administeredAt?: string;
+  syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
+  syncAttempts?: number;
+  syncNextAttemptAt?: number;
+  syncError?: string;
 }
 
 export interface NotificationItem {
