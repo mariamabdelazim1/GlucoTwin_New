@@ -126,6 +126,7 @@ class SyncApi {
   bool _syncing = false;
   int _sessionRevision = 0;
   final Map<String, Future<void>> _outboxLocks = {};
+  Future<void> _sessionTail = Future<void>.value();
   VoidCallback? onLocalChange;
   String _snapshotKey(String id) => 'glucotwin.snapshot.v1.$id';
   String _outboxKey(String id) => 'glucotwin.outbox.v1.$id';
@@ -144,66 +145,99 @@ class SyncApi {
     }
   }
 
-  Future<void> restore() async {
-    final restoringRevision = ++_sessionRevision;
-    final restoredToken = await store.read(_tokenKey);
-    final saved = await store.read(_accountKey);
-    if (restoringRevision != _sessionRevision) return;
-    token = restoredToken;
-    if (saved != null) {
-      cachedAccount = Map<String, dynamic>.from(jsonDecode(saved) as Map);
-      currentPatientId = cachedAccount?['id'] as String?;
-    }
-    if (token == null) {
-      final preferences = await SharedPreferences.getInstance();
-      final legacy = preferences.getString('patient_sync_token');
-      if (legacy != null) {
-        await store.write(_tokenKey, legacy);
-        if (restoringRevision != _sessionRevision) return;
-        token = legacy;
-        authPaused = false;
-        await preferences.remove('patient_sync_token');
-      }
-    }
-    if (currentPatientId != null) {
-      final id = currentPatientId!;
-      final raw = await store.read(_snapshotKey(id));
-      if (restoringRevision != _sessionRevision || currentPatientId != id) return;
-      if (raw != null)
-        _serverSnapshot = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      await _withOutboxLock(id, () async {
-        final operations = await _readOutboxUnlocked(id);
-        for (final op in operations.where((value) => value.state == 'syncing')) {
-          op.state = 'pending';
-          op.nextAttemptAt = null;
-        }
-        await _writeOutboxUnlocked(id, operations);
-      });
+  Future<T> _withSessionLock<T>(Future<T> Function() action) async {
+    final previous = _sessionTail;
+    final released = Completer<void>();
+    _sessionTail = previous.catchError((_) {}).then((_) => released.future);
+    await previous.catchError((_) {});
+    try {
+      return await action();
+    } finally {
+      released.complete();
     }
   }
+
+  Future<T?> _withOwnedOutbox<T>(String id, String sessionToken, int revision,
+          Future<T> Function() action) =>
+      _withSessionLock(() async {
+        if (!_ownsSession(id, sessionToken, revision)) return null;
+        return _withOutboxLock(id, action);
+      });
+
+  Future<void> restore() => _withSessionLock(() async {
+        final restoringRevision = ++_sessionRevision;
+        final restoredToken = await store.read(_tokenKey);
+        final saved = await store.read(_accountKey);
+        if (restoringRevision != _sessionRevision) return;
+        token = restoredToken;
+        if (saved != null) {
+          cachedAccount = Map<String, dynamic>.from(jsonDecode(saved) as Map);
+          currentPatientId = cachedAccount?['id'] as String?;
+        }
+        if (token == null) {
+          final preferences = await SharedPreferences.getInstance();
+          final legacy = preferences.getString('patient_sync_token');
+          if (legacy != null) {
+            await store.write(_tokenKey, legacy);
+            if (restoringRevision != _sessionRevision) return;
+            token = legacy;
+            authPaused = false;
+            await preferences.remove('patient_sync_token');
+          }
+        }
+        if (currentPatientId != null) {
+          final id = currentPatientId!;
+          final raw = await store.read(_snapshotKey(id));
+          if (restoringRevision != _sessionRevision || currentPatientId != id) {
+            return;
+          }
+          if (raw != null) {
+            _serverSnapshot = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+          }
+          await _withOutboxLock(id, () async {
+            final operations = await _readOutboxUnlocked(id);
+            for (final op
+                in operations.where((value) => value.state == 'syncing')) {
+              op.state = 'pending';
+              op.nextAttemptAt = null;
+            }
+            await _writeOutboxUnlocked(id, operations);
+          });
+        }
+      });
 
   Future<void> saveToken(String value) async {
-    _sessionRevision++;
-    token = value;
-    authPaused = false;
-    await store.write(_tokenKey, value);
+    await _withSessionLock(() async {
+      _sessionRevision++;
+      token = value;
+      authPaused = false;
+      await store.write(_tokenKey, value);
+    });
   }
 
-  Future<void> _saveAccount(JsonMap account) async {
-    cachedAccount = Map<String, dynamic>.from(account);
-    currentPatientId = account['id'] as String;
-    await store.write(_accountKey, jsonEncode(account));
-  }
+  Future<int> _activateSession(String value, JsonMap account) =>
+      _withSessionLock(() async {
+        _sessionRevision++;
+        token = value;
+        authPaused = false;
+        cachedAccount = Map<String, dynamic>.from(account);
+        currentPatientId = account['id'] as String;
+        await store.write(_tokenKey, value);
+        await store.write(_accountKey, jsonEncode(account));
+        return _sessionRevision;
+      });
 
   Future<void> signOut() async {
-    _sessionRevision++;
-    token = null;
-    currentPatientId = null;
-    cachedAccount = null;
-    _serverSnapshot = {};
-    authPaused = false;
-    await store.delete(_tokenKey);
-    await store.delete(_accountKey);
+    await _withSessionLock(() async {
+      _sessionRevision++;
+      token = null;
+      currentPatientId = null;
+      cachedAccount = null;
+      _serverSnapshot = {};
+      authPaused = false;
+      await store.delete(_tokenKey);
+      await store.delete(_accountKey);
+    });
   }
 
   Future<JsonMap> request(String path,
@@ -212,8 +246,9 @@ class SyncApi {
       final request = http.Request(method, Uri.parse('$baseUrl/api/$path'));
       request.headers['Content-Type'] = 'application/json';
       final requestToken = bearerToken ?? token;
-      if (requestToken != null)
+      if (requestToken != null) {
         request.headers['Authorization'] = 'Bearer $requestToken';
+      }
       if (data != null) request.body = jsonEncode(data);
       final streamed =
           await _client.send(request).timeout(const Duration(seconds: 12));
@@ -223,9 +258,10 @@ class SyncApi {
         final decoded = jsonDecode(response.body);
         if (decoded is Map) result = Map<String, dynamic>.from(decoded);
       }
-      if (response.statusCode >= 400)
+      if (response.statusCode >= 400) {
         throw ApiException('${result['error'] ?? 'Sync request failed'}',
             statusCode: response.statusCode);
+      }
       return result;
     } on ApiException {
       rethrow;
@@ -239,12 +275,14 @@ class SyncApi {
   Future<JsonMap> login(String email, String password) async {
     final result = await request('auth/login',
         method: 'POST', data: {'email': email, 'password': password});
-    await saveToken(result['token'] as String);
     final account = Map<String, dynamic>.from(result['account'] as Map);
-    await _saveAccount(account);
+    final sessionToken = result['token'] as String;
+    final revision = await _activateSession(sessionToken, account);
     final raw = await store.read(_snapshotKey(currentPatientId!));
-    _serverSnapshot =
-        raw == null ? {} : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    if (_ownsSession(account['id'] as String, sessionToken, revision)) {
+      _serverSnapshot =
+          raw == null ? {} : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    }
     unawaited(syncOutbox(force: true));
     return account;
   }
@@ -252,9 +290,8 @@ class SyncApi {
   Future<JsonMap> register(JsonMap account) async {
     final result = await request('auth/bridge',
         method: 'POST', data: {'account': account});
-    await saveToken(result['token'] as String);
     final saved = Map<String, dynamic>.from(result['account'] as Map);
-    await _saveAccount(saved);
+    await _activateSession(result['token'] as String, saved);
     unawaited(syncOutbox(force: true));
     return saved;
   }
@@ -263,8 +300,9 @@ class SyncApi {
     final expectedId = currentPatientId;
     final expectedToken = token;
     final expectedRevision = _sessionRevision;
-    if (expectedId == null || expectedToken == null)
+    if (expectedId == null || expectedToken == null) {
       throw ApiException('Sign in before synchronizing.', statusCode: 401);
+    }
     return _fetchSnapshotForSession(
         expectedId, expectedToken, expectedRevision);
   }
@@ -277,20 +315,20 @@ class SyncApi {
   Future<JsonMap> _fetchSnapshotForSession(
       String expectedId, String expectedToken, int expectedRevision) async {
     final data = await request('snapshot', bearerToken: expectedToken);
-    if (!_ownsSession(expectedId, expectedToken, expectedRevision))
-      throw ApiException('The active session changed while synchronizing.');
     final account = Map<String, dynamic>.from(data['account'] as Map);
-    if (account['id'] != expectedId)
+    if (account['id'] != expectedId) {
       throw ApiException('The signed-in account does not own this local queue.',
           statusCode: 403);
-    cachedAccount = Map<String, dynamic>.from(account);
-    await store.write(_accountKey, jsonEncode(account));
-    if (!_ownsSession(expectedId, expectedToken, expectedRevision))
-      throw ApiException('The active session changed while synchronizing.');
-    _serverSnapshot = Map<String, dynamic>.from(data);
-    await store.write(_snapshotKey(expectedId), jsonEncode(_serverSnapshot));
-    if (!_ownsSession(expectedId, expectedToken, expectedRevision))
-      throw ApiException('The active session changed while synchronizing.');
+    }
+    await _withSessionLock(() async {
+      if (!_ownsSession(expectedId, expectedToken, expectedRevision)) {
+        throw ApiException('The active session changed while synchronizing.');
+      }
+      cachedAccount = Map<String, dynamic>.from(account);
+      _serverSnapshot = Map<String, dynamic>.from(data);
+      await store.write(_accountKey, jsonEncode(account));
+      await store.write(_snapshotKey(expectedId), jsonEncode(_serverSnapshot));
+    });
     return localSnapshot();
   }
 
@@ -302,7 +340,7 @@ class SyncApi {
         : _merge(base, await _loadOutbox(currentPatientId!));
   }
 
-  Future<List<OutboxOperation>> _loadOutbox(String id) async {
+  Future<List<OutboxOperation>> _readOutboxUnlocked(String id) async {
     final raw = await store.read(_outboxKey(id));
     if (raw == null) return [];
     return (jsonDecode(raw) as List)
@@ -311,30 +349,42 @@ class SyncApi {
         .toList();
   }
 
-  Future<void> _saveOutbox(String id, List<OutboxOperation> operations) =>
+  Future<void> _writeOutboxUnlocked(
+          String id, List<OutboxOperation> operations) =>
       store.write(_outboxKey(id),
           jsonEncode(operations.map((value) => value.toJson()).toList()));
 
+  Future<List<OutboxOperation>> _loadOutbox(String id) =>
+      _withOutboxLock(id, () => _readOutboxUnlocked(id));
+
   Future<void> queueAdd(String kind, JsonMap item) async {
     final id = currentPatientId;
-    if (id == null || item['patientSlug'] != id)
+    if (id == null || item['patientSlug'] != id) {
       throw ApiException(
           'This record does not belong to the signed-in patient.');
-    final operations = await _loadOutbox(id);
+    }
     final recordId = item['id'] as String;
-    if (operations.any(
-        (value) => value.recordId == recordId && value.type == 'create:$kind'))
-      return;
-    operations.add(OutboxOperation(
-        operationId: 'op-$recordId',
-        recordId: recordId,
-        patientId: id,
-        type: 'create:$kind',
-        payload: Map<String, dynamic>.from(item),
-        eventAt:
-            '${item['recordedAt'] ?? item['administeredAt'] ?? item['plannedEatingAt']}',
-        createdAt: DateTime.now().toUtc().toIso8601String()));
-    await _saveOutbox(id, operations);
+    await _withOutboxLock(id, () async {
+      if (currentPatientId != id) {
+        throw ApiException(
+            'The active account changed before this record was saved.');
+      }
+      final operations = await _readOutboxUnlocked(id);
+      if (operations.any((value) =>
+          value.recordId == recordId && value.type == 'create:$kind')) {
+        return;
+      }
+      operations.add(OutboxOperation(
+          operationId: 'op-$recordId',
+          recordId: recordId,
+          patientId: id,
+          type: 'create:$kind',
+          payload: Map<String, dynamic>.from(item),
+          eventAt:
+              '${item['recordedAt'] ?? item['administeredAt'] ?? item['plannedEatingAt']}',
+          createdAt: DateTime.now().toUtc().toIso8601String()));
+      await _writeOutboxUnlocked(id, operations);
+    });
     onLocalChange?.call();
     unawaited(syncOutbox());
   }
@@ -342,24 +392,30 @@ class SyncApi {
   Future<void> queueMealUpdate(String recordId, JsonMap update) async {
     final id = currentPatientId;
     if (id == null) throw ApiException('Sign in before updating a meal.');
-    final operations = await _loadOutbox(id);
-    final create = operations
-        .where((value) =>
-            value.recordId == recordId && value.type == 'create:food')
-        .firstOrNull;
     final mutationId = update['mutationId'] as String;
-    if (operations.any((value) => value.operationId == mutationId)) return;
-    operations.add(OutboxOperation(
-        operationId: mutationId,
-        recordId: recordId,
-        patientId: id,
-        type: 'update:food',
-        payload: Map<String, dynamic>.from(update),
-        eventAt:
-            '${update['actualEatingAt'] ?? DateTime.now().toUtc().toIso8601String()}',
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-        dependsOn: create?.operationId));
-    await _saveOutbox(id, operations);
+    await _withOutboxLock(id, () async {
+      if (currentPatientId != id) {
+        throw ApiException(
+            'The active account changed before this meal update was saved.');
+      }
+      final operations = await _readOutboxUnlocked(id);
+      final create = operations
+          .where((value) =>
+              value.recordId == recordId && value.type == 'create:food')
+          .firstOrNull;
+      if (operations.any((value) => value.operationId == mutationId)) return;
+      operations.add(OutboxOperation(
+          operationId: mutationId,
+          recordId: recordId,
+          patientId: id,
+          type: 'update:food',
+          payload: Map<String, dynamic>.from(update),
+          eventAt:
+              '${update['actualEatingAt'] ?? DateTime.now().toUtc().toIso8601String()}',
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+          dependsOn: create?.operationId));
+      await _writeOutboxUnlocked(id, operations);
+    });
     onLocalChange?.call();
     unawaited(syncOutbox());
   }
@@ -367,108 +423,206 @@ class SyncApi {
   Future<void> retry(String operationId) async {
     final id = currentPatientId;
     if (id == null) return;
-    final operations = await _loadOutbox(id);
-    final op = operations
-        .where((value) => value.operationId == operationId)
-        .firstOrNull;
-    if (op == null) return;
-    op.state = 'pending';
-    op.attempts = 0;
-    op.nextAttemptAt = null;
-    op.errorKind = null;
-    op.errorMessage = null;
-    await _saveOutbox(id, operations);
+    final found = await _withOutboxLock(id, () async {
+      if (currentPatientId != id) return false;
+      final operations = await _readOutboxUnlocked(id);
+      final op = operations
+          .where((value) => value.operationId == operationId)
+          .firstOrNull;
+      if (op == null) return false;
+      op.state = 'pending';
+      op.attempts = 0;
+      op.nextAttemptAt = null;
+      op.errorKind = null;
+      op.errorMessage = null;
+      await _writeOutboxUnlocked(id, operations);
+      return true;
+    });
+    if (!found) return;
     onLocalChange?.call();
     await syncOutbox(force: true);
   }
 
   Future<void> syncOutbox({bool force = false}) async {
     final id = currentPatientId;
-    if (_syncing || id == null || token == null || authPaused) return;
+    final workerToken = token;
+    final workerRevision = _sessionRevision;
+    if (_syncing || id == null || workerToken == null || authPaused) return;
     _syncing = true;
+    final attemptedIds = <String>{};
     try {
-      final operations = await _loadOutbox(id);
-      for (final op in List<OutboxOperation>.from(operations)) {
-        if (currentPatientId != id) break;
-        if (!force && (op.state == 'failed' || op.state == 'conflict'))
-          continue;
-        final next = DateTime.tryParse(op.nextAttemptAt ?? '');
-        if (!force && next != null && next.isAfter(DateTime.now().toUtc()))
-          continue;
-        if (op.dependsOn != null &&
-            operations.any((value) => value.operationId == op.dependsOn))
-          continue;
-        op.state = 'syncing';
-        op.errorKind = null;
-        op.errorMessage = null;
-        await _saveOutbox(id, operations);
+      while (_ownsSession(id, workerToken, workerRevision) && !authPaused) {
+        final op = await _claimNextOperation(
+            id, workerToken, workerRevision, force, attemptedIds);
+        if (op == null) break;
+        attemptedIds.add(op.operationId);
         onLocalChange?.call();
+        var stopWorker = false;
         try {
+          final requestPayload = Map<String, dynamic>.from(op.payload);
           if (op.type.startsWith('create:')) {
             await request(op.type.substring(7),
-                method: 'POST', data: op.payload);
+                method: 'POST', data: requestPayload, bearerToken: workerToken);
           } else {
-            if (op.payload['expectedVersion'] == null)
-              op.payload['expectedVersion'] =
+            if (requestPayload['expectedVersion'] == null) {
+              requestPayload['expectedVersion'] =
                   _findById(_serverSnapshot['food'], op.recordId)?['version'];
-            if (op.payload['expectedVersion'] == null)
+            }
+            if (requestPayload['expectedVersion'] == null) {
               throw ApiException(
                   'Waiting for the planned meal to be confirmed by the server.',
                   network: true);
+            }
             await request('food/${Uri.encodeComponent(op.recordId)}',
-                method: 'PATCH', data: op.payload);
+                method: 'PATCH',
+                data: requestPayload,
+                bearerToken: workerToken);
           }
-          operations.remove(op);
-          await _saveOutbox(id, operations);
+          final removed = await _removeOwnedOperation(
+              id, workerToken, workerRevision, op.operationId);
+          if (!removed) {
+            await _restoreInterruptedOperation(id, op.operationId);
+            break;
+          }
           try {
-            await snapshot();
+            await _fetchSnapshotForSession(id, workerToken, workerRevision);
           } catch (_) {}
         } on ApiException catch (error) {
+          if (!_ownsSession(id, workerToken, workerRevision)) {
+            await _restoreInterruptedOperation(id, op.operationId);
+            break;
+          }
           var acknowledged = false;
           if (error.network || error.statusCode == 409) {
             try {
-              await snapshot();
+              await _fetchSnapshotForSession(id, workerToken, workerRevision);
               acknowledged = _operationMatchesSnapshot(op, _serverSnapshot);
             } catch (_) {}
           }
-          if (acknowledged)
-            operations.remove(op);
-          else if (error.statusCode == 401) {
-            op.state = 'pending';
-            op.errorKind = 'authentication';
-            op.errorMessage = 'Sign in again to resume synchronization.';
-            authPaused = true;
-          } else if (error.statusCode == 409) {
-            op.state = 'conflict';
-            op.errorKind = 'conflict';
-            op.errorMessage =
-                'The server has a different version. Review before retrying.';
-          } else if (!error.network &&
-              error.statusCode != null &&
-              error.statusCode! >= 400 &&
-              error.statusCode! < 500 &&
-              error.statusCode != 408 &&
-              error.statusCode != 429) {
-            op.state = 'failed';
-            op.errorKind = 'validation';
-            op.errorMessage = error.message;
-          } else {
-            op.state = 'pending';
-            op.attempts += 1;
-            op.errorKind = 'network';
-            op.errorMessage = 'Saved on this device; waiting to sync.';
-            op.nextAttemptAt = DateTime.now()
-                .toUtc()
-                .add(Duration(seconds: min(300, 1 << min(op.attempts, 8))))
-                .toIso8601String();
+          final updated = await _recordOperationResult(
+              id, workerToken, workerRevision, op, error, acknowledged);
+          if (!updated) {
+            await _restoreInterruptedOperation(id, op.operationId);
+            break;
           }
-          await _saveOutbox(id, operations);
+          stopWorker = error.statusCode == 401 && !acknowledged;
         }
         onLocalChange?.call();
+        if (stopWorker) break;
       }
     } finally {
       _syncing = false;
+      if (token != null &&
+          !authPaused &&
+          (currentPatientId != id || _sessionRevision != workerRevision)) {
+        scheduleMicrotask(() => syncOutbox(force: force));
+      }
     }
+  }
+
+  Future<OutboxOperation?> _claimNextOperation(String id, String sessionToken,
+      int revision, bool force, Set<String> attemptedIds) async {
+    final result = await _withOwnedOutbox<OutboxOperation?>(
+        id, sessionToken, revision, () async {
+      final operations = await _readOutboxUnlocked(id);
+      for (final op in operations) {
+        if (attemptedIds.contains(op.operationId)) continue;
+        if (!force && (op.state == 'failed' || op.state == 'conflict')) {
+          continue;
+        }
+        final next = DateTime.tryParse(op.nextAttemptAt ?? '');
+        if (!force && next != null && next.isAfter(DateTime.now().toUtc())) {
+          continue;
+        }
+        if (op.dependsOn != null &&
+            operations.any((value) => value.operationId == op.dependsOn)) {
+          continue;
+        }
+        op.state = 'syncing';
+        op.errorKind = null;
+        op.errorMessage = null;
+        await _writeOutboxUnlocked(id, operations);
+        return OutboxOperation.fromJson(op.toJson());
+      }
+      return null;
+    });
+    return result;
+  }
+
+  Future<bool> _removeOwnedOperation(
+      String id, String sessionToken, int revision, String operationId) async {
+    final result =
+        await _withOwnedOutbox<bool>(id, sessionToken, revision, () async {
+      final latest = await _readOutboxUnlocked(id);
+      latest.removeWhere((value) => value.operationId == operationId);
+      await _writeOutboxUnlocked(id, latest);
+      return true;
+    });
+    return result ?? false;
+  }
+
+  Future<void> _restoreInterruptedOperation(
+      String id, String operationId) async {
+    await _withOutboxLock(id, () async {
+      final latest = await _readOutboxUnlocked(id);
+      final stored =
+          latest.where((value) => value.operationId == operationId).firstOrNull;
+      if (stored == null || stored.state != 'syncing') return;
+      stored.state = 'pending';
+      stored.nextAttemptAt = null;
+      await _writeOutboxUnlocked(id, latest);
+    });
+  }
+
+  Future<bool> _recordOperationResult(
+      String id,
+      String sessionToken,
+      int revision,
+      OutboxOperation attempted,
+      ApiException error,
+      bool acknowledged) async {
+    final result =
+        await _withOwnedOutbox<bool>(id, sessionToken, revision, () async {
+      final latest = await _readOutboxUnlocked(id);
+      final stored = latest
+          .where((value) => value.operationId == attempted.operationId)
+          .firstOrNull;
+      if (stored == null) return true;
+      if (acknowledged) {
+        latest.remove(stored);
+      } else if (error.statusCode == 401) {
+        stored.state = 'pending';
+        stored.errorKind = 'authentication';
+        stored.errorMessage = 'Sign in again to resume synchronization.';
+        authPaused = true;
+      } else if (error.statusCode == 409) {
+        stored.state = 'conflict';
+        stored.errorKind = 'conflict';
+        stored.errorMessage =
+            'The server has a different version. Review before retrying.';
+      } else if (!error.network &&
+          error.statusCode != null &&
+          error.statusCode! >= 400 &&
+          error.statusCode! < 500 &&
+          error.statusCode != 408 &&
+          error.statusCode != 429) {
+        stored.state = 'failed';
+        stored.errorKind = 'validation';
+        stored.errorMessage = error.message;
+      } else {
+        stored.state = 'pending';
+        stored.attempts += 1;
+        stored.errorKind = 'network';
+        stored.errorMessage = 'Saved on this device; waiting to sync.';
+        stored.nextAttemptAt = DateTime.now()
+            .toUtc()
+            .add(Duration(seconds: min(300, 1 << min(stored.attempts, 8))))
+            .toIso8601String();
+      }
+      await _writeOutboxUnlocked(id, latest);
+      return true;
+    });
+    return result ?? false;
   }
 
   bool _operationMatchesSnapshot(OutboxOperation op, JsonMap snapshot) {
@@ -478,8 +632,9 @@ class SyncApi {
     if (op.type == 'update:food') {
       if (found['status'] != op.payload['status']) return false;
       if (op.payload.containsKey('consumedCarbsG') &&
-          !_sameNumber(found['consumedCarbsG'], op.payload['consumedCarbsG']))
+          !_sameNumber(found['consumedCarbsG'], op.payload['consumedCarbsG'])) {
         return false;
+      }
       return op.payload['status'] == 'cancelled' ||
           _sameInstant(found['actualEatingAt'], op.payload['actualEatingAt']);
     }

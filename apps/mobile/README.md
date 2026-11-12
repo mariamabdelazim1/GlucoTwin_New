@@ -27,6 +27,13 @@ manual refresh, and app resume. An interrupted `syncing` operation becomes
 snapshot matches the record ID and authoritative clinical content. HTTP 401
 pauses uploads without deleting the session cache or outbox.
 
+Outbox read-modify-write operations are serialized per account. The storage
+lock is released while HTTP is in flight, so a patient can keep saving records;
+completion handling reloads the latest queue and changes only the attempted
+operation. Uploads retain their owning session token. A 401 stops the worker
+immediately, and logout or account switching prevents an older response from
+changing the new account's queue, cache, or snapshot.
+
 Meal updates retain a stable `mutationId` and expected version. An offline
 confirmation/cancellation waits for its planned-meal create to be confirmed.
 Stale server versions remain visible as conflicts; the client does not silently
