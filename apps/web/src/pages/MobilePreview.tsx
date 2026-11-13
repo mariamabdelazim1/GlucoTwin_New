@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { Account } from '../types';
 import { chronologicalMessages } from '../utils/messages';
-import { getSnapshot, loginAccount, syncItem, updateMeal } from '../utils/sync';
+import { authenticationErrorMessage, getSnapshot, loginAccount, syncItem, updateMeal } from '../utils/sync';
 import type { SyncSnapshot } from '../utils/sync';
 
 type Tab = 'overview' | 'record' | 'care' | 'profile';
@@ -44,7 +44,7 @@ export function MobilePreview({ existingPatient }: { existingPatient?: Account }
     event.preventDefault();
     setBusy(true);
     try { await loginAccount({ email: email.trim(), password, role: 'patient' }); await refresh(); }
-    catch { setError('Incorrect email or password, or sync service unavailable.'); }
+    catch (cause) { setError(authenticationErrorMessage(cause)); }
     setBusy(false);
   };
   const post = async (kind: 'glucose' | 'food' | 'bolus' | 'messages', item: Record<string, unknown>) => {

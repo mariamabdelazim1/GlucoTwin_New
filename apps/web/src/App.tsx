@@ -317,7 +317,7 @@ export default function App() {
       const remote = await loginAccount({ email: identifier, password, role: mode });
       setAccounts((current) => current.some((item) => item.id === remote.id) ? current.map((item) => item.id === remote.id ? remote : item) : [...current, remote]);
       setSession({ id: remote.id, role: mode });
-    } catch (error) { return authenticationErrorMessage(error, 'Unable to connect to the care service. Check your connection and try again.'); }
+    } catch (error) { return authenticationErrorMessage(error); }
     return null;
   };
   const register = async (request: PatientRegistrationRequest) => {
@@ -327,7 +327,7 @@ export default function App() {
       setAccounts((current) => [...current, created.account]);
       if (created.assignment) setAssignments((current) => [created.assignment!, ...current]);
       setSession({ id: created.account.id, role: created.account.role });
-    } catch (error) { return authenticationErrorMessage(error, 'Unable to connect to the care service. Check your connection and try again.'); }
+    } catch (error) { return authenticationErrorMessage(error); }
     return null;
   };
   const loginProps = { accounts, ratings, onSignIn: signIn, onRegister: register };

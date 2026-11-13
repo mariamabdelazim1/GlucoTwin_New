@@ -20,6 +20,25 @@ export class SyncApiError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
+export class SyncNetworkError extends Error {
+  constructor() { super('The care service could not be reached.'); }
+}
+
+export class SyncResponseError extends Error {
+  constructor() { super('The care service returned an invalid response.'); }
+}
+
+export class SyncStorageError extends Error {
+  constructor() { super('The browser could not save the authenticated session.'); }
+}
+
+const authenticationMessages = {
+  connection: 'Unable to connect to the care service. Check your connection and try again.',
+  response: 'The care service returned an invalid response. Please try again.',
+  storage: 'The browser could not save your session. Check browser storage settings and try again.',
+  unexpected: 'Authentication could not be completed. Please try again.',
+} as const;
+
 export interface SyncSnapshot {
   account: Account;
   doctors: Account[];
@@ -42,32 +61,62 @@ export interface EmergencyContact {
 
 function publicAccount(value: unknown) {
   const account = sanitizePublicAccount(value);
-  if (!account) throw new Error('The care service returned an invalid account.');
+  if (!account) throw new SyncResponseError();
   return account;
 }
 
 async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<T> {
-  const token = sessionStorage.getItem('ddt.sync.token');
-  const response = await fetch(`/api/${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new SyncApiError(response.status, result.error || 'Sync request failed');
+  let token: string | null;
+  try { token = sessionStorage.getItem('ddt.sync.token'); }
+  catch { throw new SyncStorageError(); }
+  let response: Response;
+  try {
+    response = await fetch(`/api/${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+  } catch { throw new SyncNetworkError(); }
+  let result: unknown;
+  try { result = await response.json(); }
+  catch {
+    if (response.ok) throw new SyncResponseError();
+    throw new SyncApiError(response.status, 'The care service rejected the request.');
+  }
+  if (!response.ok) {
+    const message = result && typeof result === 'object' && typeof (result as { error?: unknown }).error === 'string'
+      ? (result as { error: string }).error
+      : 'The care service rejected the request.';
+    throw new SyncApiError(response.status, message);
+  }
   return result as T;
 }
 
+function validatedAuthentication(result: unknown) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new SyncResponseError();
+  const authentication = result as { token?: unknown; account?: unknown };
+  if (typeof authentication.token !== 'string' || !authentication.token.trim()) throw new SyncResponseError();
+  return { token: authentication.token, account: publicAccount(authentication.account) };
+}
+
+function persistAuthenticationToken(token: string) {
+  try { sessionStorage.setItem('ddt.sync.token', token); }
+  catch { throw new SyncStorageError(); }
+}
+
 export async function bridgeAccount(request: PatientRegistrationRequest) {
-  const result = await api<{ token: string; account: Account; assignment?: CareAssignment | null }>('auth/bridge', 'POST', { account: { ...request.account, password: request.password } });
-  sessionStorage.setItem('ddt.sync.token', result.token);
-  return { ...result, account: publicAccount(result.account) };
+  const result = await api<unknown>('auth/bridge', 'POST', { account: { ...request.account, password: request.password } });
+  const authentication = validatedAuthentication(result);
+  persistAuthenticationToken(authentication.token);
+  const assignment = (result as { assignment?: CareAssignment | null }).assignment;
+  return { ...authentication, assignment };
 }
 
 export async function loginAccount(request: LoginRequest) {
-  const result = await api<{ token: string; account: Account }>('auth/login', 'POST', request);
-  sessionStorage.setItem('ddt.sync.token', result.token);
-  return publicAccount(result.account);
+  const result = await api<unknown>('auth/login', 'POST', request);
+  const authentication = validatedAuthentication(result);
+  persistAuthenticationToken(authentication.token);
+  return authentication.account;
 }
 
 export const getSnapshot = async () => {
@@ -79,8 +128,12 @@ export const updateAccountProfile = async (account: Account) => {
   return { account: publicAccount(result.account) };
 };
 
-export function authenticationErrorMessage(error: unknown, connectionMessage: string) {
-  return error instanceof SyncApiError ? error.message : connectionMessage;
+export function authenticationErrorMessage(error: unknown) {
+  if (error instanceof SyncApiError) return error.message;
+  if (error instanceof SyncNetworkError) return authenticationMessages.connection;
+  if (error instanceof SyncResponseError) return authenticationMessages.response;
+  if (error instanceof SyncStorageError) return authenticationMessages.storage;
+  return authenticationMessages.unexpected;
 }
 export const requestCareDoctor = (doctorId: string) => api<{ assignment: CareAssignment }>('patient/doctor-request', 'POST', { doctorId });
 export const syncItem = (kind: 'food' | 'bolus' | 'glucose' | 'messages', item: unknown) =>
