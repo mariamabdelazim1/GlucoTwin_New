@@ -1,7 +1,20 @@
 import type { Account } from '../types';
 
-export function mergePublicDoctors(current: Account[], remoteDoctors: Omit<Account, 'password'>[]) {
-  const remoteById = new Map(remoteDoctors.map((doctor) => [doctor.id, doctor]));
+export function sanitizePublicAccount(value: unknown): Account | null {
+  if (!value || typeof value !== 'object') return null;
+  const { password: _password, ...account } = value as Record<string, unknown>;
+  if (typeof account.id !== 'string' || typeof account.email !== 'string' || (account.role !== 'doctor' && account.role !== 'patient')) return null;
+  return account as unknown as Account;
+}
+
+export function sanitizeStoredAccounts(value: unknown, fallback: Account[] = []) {
+  if (!Array.isArray(value)) return fallback;
+  return value.map(sanitizePublicAccount).filter((account): account is Account => Boolean(account));
+}
+
+export function mergePublicDoctors(current: Account[], remoteDoctors: Account[]) {
+  const sanitized = remoteDoctors.map(sanitizePublicAccount).filter((doctor): doctor is Account => Boolean(doctor));
+  const remoteById = new Map(sanitized.map((doctor) => [doctor.id, doctor]));
   let changed = false;
   const merged = current.map((local) => {
     const remote = remoteById.get(local.id);
@@ -9,10 +22,9 @@ export function mergePublicDoctors(current: Account[], remoteDoctors: Omit<Accou
     remoteById.delete(local.id);
     if (local.role === remote.role && local.email === remote.email
       && JSON.stringify(local.doctorProfile) === JSON.stringify(remote.doctorProfile)) return local;
-    const next = { ...remote, password: local.password } as Account;
     changed = true;
-    return next;
+    return remote;
   });
   if (remoteById.size) changed = true;
-  return changed ? [...merged, ...[...remoteById.values()].map((doctor) => ({ ...doctor, password: '' } as Account))] : current;
+  return changed ? [...merged, ...remoteById.values()] : current;
 }

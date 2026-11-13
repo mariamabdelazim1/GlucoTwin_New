@@ -52,9 +52,19 @@ export interface Account {
   id: string;
   role: 'doctor' | 'patient';
   email: string;
-  password: string;
   doctorProfile?: DoctorProfileData;
   patientProfile?: PatientProfile;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+  role: Account['role'];
+}
+
+export interface PatientRegistrationRequest {
+  account: Account & { role: 'patient' };
+  password: string;
 }
 
 export interface CareAssignment {

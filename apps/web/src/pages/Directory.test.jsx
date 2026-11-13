@@ -33,6 +33,25 @@ test('a fresh public directory replaces seeded profile values and fetches once',
   expect(screen.getByText(/Updated qualifications/)).toBeTruthy();
   expect(doctorRequests).toBe(1);
   const storedDoctor = JSON.parse(localStorage.getItem('ddt.accounts.v1')).find((item) => item.id === 'DR-001');
-  expect(storedDoctor.password).toBe('password');
+  expect(storedDoctor).not.toHaveProperty('password');
   expect(storedDoctor.doctorProfile.bio).toBe('Authoritative server biography');
+});
+
+test('legacy account passwords are sanitized without changing profiles or pending uploads', async () => {
+  const profile = { fullName: 'Legacy Patient', age: '28', weight: '65', height: '168', diabetesType: 'Type 1 Diabetes', insulinPlan: '', diagnosisYear: '', medications: '', allergies: '', emergencyContact: '', selectedDoctorId: 'DR-001' };
+  localStorage.setItem('ddt.accounts.v1', JSON.stringify([{ id: 'legacy-patient', role: 'patient', email: 'legacy@example.test', password: 'must-disappear', patientProfile: profile }]));
+  const pending = [{ id: 'pending-1', patientSlug: 'legacy-patient', value: 120, syncState: 'pending' }];
+  localStorage.setItem('ddt.glucose.v1', JSON.stringify(pending));
+  vi.stubGlobal('fetch', vi.fn(async (url) => {
+    if (url === '/api/doctors') return { ok: true, json: async () => response };
+    throw new Error(`Unexpected request ${url}`);
+  }));
+  window.history.pushState({}, '', '/doctors');
+  render(<BrowserRouter><App /></BrowserRouter>);
+  await waitFor(() => {
+    const account = JSON.parse(localStorage.getItem('ddt.accounts.v1')).find((item) => item.id === 'legacy-patient');
+    expect(account).toEqual({ id: 'legacy-patient', role: 'patient', email: 'legacy@example.test', patientProfile: profile });
+  });
+  expect(JSON.parse(localStorage.getItem('ddt.glucose.v1'))).toEqual(pending);
+  expect(localStorage.getItem('ddt.accounts.v1')).not.toContain('must-disappear');
 });

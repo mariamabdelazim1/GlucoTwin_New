@@ -205,6 +205,13 @@ describe.skipIf(!enabled)('React synchronization against PostgreSQL', () => {
     await eventually('the login response to return successfully', () => expect(phases.loginResponseStatus).toBe(200));
     await eventually('the login response JSON to be consumed', () => expect(phases.loginResponsesParsed).toBe(1));
     await eventually('the authenticated session to be stored', () => expect(JSON.parse(sessionStorage.getItem('ddt.session.v1')).id).toBe(patient.id));
+    await eventually('the authenticated public account to be persisted without credentials', () => {
+      const stored = JSON.parse(localStorage.getItem('ddt.accounts.v1')).find((item) => item.id === patient.id);
+      expect(stored).toBeTruthy();
+      expect(stored).not.toHaveProperty('password');
+      expect(localStorage.getItem('ddt.accounts.v1')).not.toContain(patient.password);
+      expect(sessionStorage.getItem('ddt.session.v1')).not.toContain(patient.password);
+    });
     await eventually('routing to the patient dashboard', () => expect(window.location.pathname).toBe('/patient/dashboard'));
     await eventually('the patient dashboard to render after sign-in', () => expect(screen.getByText('Welcome, React Sync Patient')).toBeTruthy());
     await eventually('the initial snapshot request to start', () => expect(phases.snapshotRequestsStarted).toBe(1));

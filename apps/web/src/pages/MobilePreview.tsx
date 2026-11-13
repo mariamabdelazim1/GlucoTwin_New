@@ -43,7 +43,7 @@ export function MobilePreview({ existingPatient }: { existingPatient?: Account }
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
-    try { await loginAccount(email.trim(), password, 'patient'); await refresh(); }
+    try { await loginAccount({ email: email.trim(), password, role: 'patient' }); await refresh(); }
     catch { setError('Incorrect email or password, or sync service unavailable.'); }
     setBusy(false);
   };
