@@ -1,0 +1,10 @@
+{
+  "configuration_version": "experimental_constant_basal_grid_example_v1",
+  "maximum_decrease_u_per_hour": 0.2,
+  "maximum_increase_u_per_hour": 0.2,
+  "absolute_minimum_u_per_hour": 0.0,
+  "absolute_maximum_u_per_hour": 3.0,
+  "increment_u_per_hour": 0.05,
+  "maximum_candidate_count": 9,
+  "intended_use": "Research example only; these search bounds are not clinically validated limits."
+}
