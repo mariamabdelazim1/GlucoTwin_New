@@ -107,6 +107,13 @@ def _validate_candidate(candidate: BasalRateCandidate, index: int) -> None:
         raise ValueError(f"Candidate {candidate.candidate_id} rate must be numeric and not Boolean")
     if not np.isfinite(float(rate)) or float(rate) < 0:
         raise ValueError(f"Candidate {candidate.candidate_id} rate must be finite and nonnegative")
+    with np.errstate(over="ignore", invalid="ignore"):
+        float32_rate = np.float32(float(rate))
+    if not np.isfinite(float32_rate):
+        raise ValueError(
+            f"Candidate {candidate.candidate_id} basal_rate_u_per_hour becomes "
+            "nonfinite after float32 conversion"
+        )
     if not isinstance(candidate.is_recorded_baseline, (bool, np.bool_)):
         raise ValueError(
             f"Candidate {candidate.candidate_id} baseline flag must be Boolean"
@@ -115,10 +122,56 @@ def _validate_candidate(candidate: BasalRateCandidate, index: int) -> None:
 
 def _storage_pointer(tensor: torch.Tensor) -> int:
     return tensor.untyped_storage().data_ptr()
-    if not isinstance(candidate.is_recorded_baseline, (bool, np.bool_)):
+
+
+def _locations(mask: torch.Tensor, timestamps: tuple[pd.Timestamp, ...]) -> list[str]:
+    indexes = mask.detach().cpu().nonzero().flatten().tolist()
+    return [str(timestamps[index]) for index in indexes[:5]]
+
+
+def _validate_converted_recorded_tensor(
+    values: torch.Tensor,
+    column: str,
+    timestamps: tuple[pd.Timestamp, ...],
+) -> None:
+    nonfinite = ~torch.isfinite(values)
+    if nonfinite.any().item():
         raise ValueError(
-            f"Candidate {candidate.candidate_id} baseline flag must be Boolean"
+            f"{column} becomes nonfinite after float32 conversion at interval "
+            f"timestamps {_locations(nonfinite, timestamps)}"
         )
+    negative = values < 0
+    if negative.any().item():
+        raise ValueError(
+            f"{column} becomes negative after float32 conversion at interval "
+            f"timestamps {_locations(negative, timestamps)}"
+        )
+
+
+def _validate_materialized_inputs(
+    candidate_id: str,
+    inputs: torch.Tensor,
+    timestamps: tuple[pd.Timestamp, ...],
+) -> None:
+    for column_index, column in enumerate(PHYSIOLOGICAL_INPUT_NAMES):
+        values = inputs[:, column_index]
+        nonfinite = ~torch.isfinite(values)
+        if nonfinite.any().item():
+            raise ValueError(
+                f"Candidate {candidate_id} materialized {column} is nonfinite at interval "
+                f"timestamps {_locations(nonfinite, timestamps)}"
+            )
+        negative = values < 0
+        if negative.any().item():
+            raise ValueError(
+                f"Candidate {candidate_id} materialized {column} is negative at interval "
+                f"timestamps {_locations(negative, timestamps)}"
+            )
+
+
+def _require_finite_total(value: float, description: str) -> None:
+    if not np.isfinite(value):
+        raise ValueError(f"{description} is nonfinite")
 
 
 def _validate_compatibility(
@@ -248,8 +301,20 @@ def build_candidate_inputs(
     recorded_consumed_carbs = torch.as_tensor(
         consumed_carbs, dtype=torch.float32, device=device
     )
+    _validate_converted_recorded_tensor(recorded_bolus, "bolus_u", input_timestamps)
+    _validate_converted_recorded_tensor(
+        recorded_consumed_carbs, "consumed_carbs_g", input_timestamps
+    )
     expected_bolus_total = float(recorded_bolus.sum().item())
     expected_carbs_total = float(recorded_consumed_carbs.sum().item())
+    _require_finite_total(
+        expected_bolus_total,
+        "Recorded bolus_u expected total after float32 reduction",
+    )
+    _require_finite_total(
+        expected_carbs_total,
+        "Recorded consumed_carbs_g expected total after float32 reduction",
+    )
     materialized: list[CandidatePhysiologicalInputs] = []
     for candidate in candidate_set.candidates:
         clone = snapshot.clone_initial_conditions()
@@ -281,10 +346,27 @@ def build_candidate_inputs(
         inputs[:, 0] = float(candidate.rate_u_per_hour)
         inputs[:, 1] = recorded_bolus
         inputs[:, 2] = recorded_consumed_carbs
+        _validate_materialized_inputs(candidate.candidate_id, inputs, input_timestamps)
         basal_total = float((inputs[:, 0].sum() * (5.0 / 60.0)).item())
         bolus_total = float(inputs[:, 1].sum().item())
         carbs_total = float(inputs[:, 2].sum().item())
         expected_basal_total = float(candidate.rate_u_per_hour) * REPLAY_HOURS
+        _require_finite_total(
+            expected_basal_total,
+            f"Candidate {candidate.candidate_id} expected basal_rate_u_per_hour total",
+        )
+        _require_finite_total(
+            basal_total,
+            f"Candidate {candidate.candidate_id} represented basal_rate_u_per_hour total",
+        )
+        _require_finite_total(
+            bolus_total,
+            f"Candidate {candidate.candidate_id} represented bolus_u total",
+        )
+        _require_finite_total(
+            carbs_total,
+            f"Candidate {candidate.candidate_id} represented consumed_carbs_g total",
+        )
         if not np.isclose(
             basal_total,
             expected_basal_total,

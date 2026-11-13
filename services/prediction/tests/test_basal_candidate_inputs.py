@@ -5,6 +5,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from basal_optimization.candidate_generation import (
     BasalSearchConfiguration,
     generate_basal_candidates,
 )
+import basal_optimization.candidate_inputs as candidate_inputs_module
 from basal_optimization.candidate_inputs import build_candidate_inputs
 from basal_optimization.preparation import PatientIdentity
 
@@ -235,6 +237,72 @@ class BasalCandidateInputTests(unittest.TestCase):
         missing_column.replay_intervals = missing_column.replay_intervals.drop(columns="bolus_u")
         with self.assertRaisesRegex(ValueError, "missing required"):
             build(missing_column)
+
+    def test_float64_recorded_values_overflowing_float32_are_rejected(self):
+        for column in ("bolus_u", "consumed_carbs_g"):
+            prepared = snapshot()
+            prepared.replay_intervals.loc[20, column] = 1e40
+            before = prepared.replay_intervals.copy(deep=True)
+            with self.subTest(column=column):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"{column} becomes nonfinite after float32 conversion.*2027-01-02 01:40:00",
+                ):
+                    build(prepared)
+            pd.testing.assert_frame_equal(prepared.replay_intervals, before)
+
+    def test_finite_float32_values_with_overflowing_sum_are_rejected(self):
+        prepared = snapshot()
+        finite_float32 = float(np.finfo(np.float32).max / 4)
+        prepared.replay_intervals["bolus_u"] = finite_float32
+        before = prepared.replay_intervals.copy(deep=True)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Recorded bolus_u expected total after float32 reduction is nonfinite",
+        ):
+            build(prepared)
+        pd.testing.assert_frame_equal(prepared.replay_intervals, before)
+
+    def test_candidate_rate_overflowing_float32_is_rejected_actionably(self):
+        prepared = snapshot()
+        candidate_set = generate_basal_candidates(prepared, configuration())
+        malformed = list(candidate_set.candidates)
+        malformed[0] = replace(malformed[0], rate_u_per_hour=1e40)
+        before = prepared.replay_intervals.copy(deep=True)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Candidate basal_0000 basal_rate_u_per_hour becomes nonfinite after float32 conversion",
+        ):
+            build_candidate_inputs(
+                prepared,
+                replace(candidate_set, candidates=tuple(malformed)),
+            )
+        pd.testing.assert_frame_equal(prepared.replay_intervals, before)
+
+    def test_nonfinite_expected_and_represented_basal_totals_are_rejected(self):
+        prepared = snapshot()
+        candidate_set = generate_basal_candidates(prepared, configuration())
+        with mock.patch.object(candidate_inputs_module, "REPLAY_HOURS", float("inf")):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Candidate basal_0000 expected basal_rate_u_per_hour total is nonfinite",
+            ):
+                build_candidate_inputs(prepared, candidate_set)
+
+        huge_but_float32_finite = float(np.finfo(np.float32).max / 4)
+        malformed = list(candidate_set.candidates)
+        malformed[0] = replace(
+            malformed[0],
+            rate_u_per_hour=huge_but_float32_finite,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "Candidate basal_0000 represented basal_rate_u_per_hour total is nonfinite",
+        ):
+            build_candidate_inputs(
+                prepared,
+                replace(candidate_set, candidates=tuple(malformed)),
+            )
 
     def test_accounting_and_shared_recorded_columns(self):
         prepared, _, batch = build()
