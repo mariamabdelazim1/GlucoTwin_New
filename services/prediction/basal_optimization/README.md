@@ -140,3 +140,37 @@ numerical failure. State trajectories are not returned. A
 `simulation_valid` result means only that the numerical validity rules passed;
 it does not establish clinical safety, effectiveness, or 48-hour predictive
 accuracy. No scores, ranks, selected rate, or recommendation are produced.
+
+## Baseline glucose-fit reliability gate
+
+`reliability.py` assesses only the candidate identified consistently by both
+`baseline_candidate_id` and its baseline flag. Predictions are joined to
+recorded outcomes by exact timestamp: outputs at `S + 5 minutes, ..., T` use
+the 575 replay rows after `S` plus the outcome row at `T`. The initialization
+value at `S` is not scored. Timestamp storage precision is normalized for
+comparison without rounding, localizing, or removing timezone information.
+Missing, duplicate, invalid, or late-measurement observations are reported and
+prevent authorization; observations are never filled or interpolated.
+
+The assessment reports float64 MAE, RMSE, predicted-minus-observed bias,
+maximum absolute error, and counts for the full 576 outputs and both exact
+288-output days, plus endpoint error. `simulation_valid` remains a numerical
+status distinct from predictive reliability.
+
+The shipped versioned configuration,
+`uncalibrated_reliability_configuration_v1.json`, deliberately contains no
+limits because no independently justified limits were available. It therefore
+returns `criteria_not_calibrated` and `future_selection_authorized=False`.
+Provisional development criteria must configure finite, positive full-window,
+Day 0, and Day 1 MAE/RMSE limits; comparisons are inclusive. A pass is named
+`reliable_under_experimental_criteria`, never “clinically safe.” A future
+selector must refuse to select unless `future_selection_authorized` is true.
+
+`run_development_reliability_pilot(maximum_patients=...)` provides an explicit,
+bounded development-only diagnostic workflow. It deterministically chooses
+complete windows without crossing patient or available continuity identifiers,
+loads the data and frozen model once, excludes validation/testing patients,
+and reports pooled-window distributions separately from equally weighted
+per-patient distributions. It does not derive thresholds from the errors it
+evaluates; callers must supply separately justified provisional criteria or
+retain the uncalibrated status.

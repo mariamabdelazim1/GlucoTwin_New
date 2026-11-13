@@ -1,0 +1,11 @@
+{
+  "configuration_version": "baseline_reliability_uncalibrated_v1",
+  "calibration_status": "not_calibrated",
+  "intended_use": "Diagnostic baseline-fit reporting only. No reliability thresholds have been independently calibrated.",
+  "full_mae_limit_mg_dl": null,
+  "full_rmse_limit_mg_dl": null,
+  "day0_mae_limit_mg_dl": null,
+  "day0_rmse_limit_mg_dl": null,
+  "day1_mae_limit_mg_dl": null,
+  "day1_rmse_limit_mg_dl": null
+}
