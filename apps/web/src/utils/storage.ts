@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 
-export function useStoredState<T>(key: string, initial: T) {
+export function useStoredState<T>(key: string, initial: T, migrate?: (value: unknown) => T) {
   const [value, setValue] = useState<T>(() => {
     try {
       const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) as T : initial;
+      if (!saved) return initial;
+      const parsed: unknown = JSON.parse(saved);
+      return migrate ? migrate(parsed) : parsed as T;
     } catch {
       return initial;
     }

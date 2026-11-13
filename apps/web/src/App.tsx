@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message, Patient, PatientProfile, Role } from './types';
+import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message, Patient, PatientProfile, PatientRegistrationRequest, Role } from './types';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { Login } from './pages/Login';
@@ -25,10 +25,10 @@ import { patients } from './data/patients';
 import { initialMessages } from './data/messages';
 import { bolusHistory, foodLog } from './data/cgm';
 import { useStoredState } from './utils/storage';
-import { bridgeAccount, getSnapshot, loginAccount, mergeById, requestCareDoctor, SyncApiError, syncAssignment, syncItem, syncRating, updateAccountProfile } from './utils/sync';
+import { authenticationErrorMessage, bridgeAccount, getSnapshot, loginAccount, mergeById, requestCareDoctor, SyncApiError, syncAssignment, syncItem, syncRating, updateAccountProfile } from './utils/sync';
 import type { GlucoseEntry } from './utils/sync';
 import { retryDecision } from './utils/syncState';
-import { mergePublicDoctors } from './utils/accountState';
+import { mergePublicDoctors, sanitizeStoredAccounts } from './utils/accountState';
 import { AssignmentDecisionError, confirmAssignmentDecision } from './utils/assignmentState';
 
 type Session = { id: string; role: Role };
@@ -112,7 +112,7 @@ function Shell({ session, account, accounts, assignments, assignmentActions, onA
 }
 
 export default function App() {
-  const [accounts, setAccounts] = useStoredState('ddt.accounts.v1', seedAccounts);
+  const [accounts, setAccounts] = useStoredState('ddt.accounts.v1', seedAccounts, (value) => sanitizeStoredAccounts(value, seedAccounts));
   const [ratings, setRatings] = useStoredState('ddt.doctorRatings.v1', seedDoctorRatings);
   const [assignments, setAssignments] = useStoredState('ddt.assignments.v1', seedAssignments);
   const [messages, setMessages] = useStoredState('ddt.messages.v1', initialMessages);
@@ -125,7 +125,10 @@ export default function App() {
   const inFlight = useRef(new Set<string>());
   const assignmentInFlight = useRef(new Set<string>());
   const [session, setSession] = useState<Session | null>(() => {
-    try { return JSON.parse(sessionStorage.getItem('ddt.session.v1') || 'null') as Session | null; } catch { return null; }
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('ddt.session.v1') || 'null') as Partial<Session> | null;
+      return stored && typeof stored.id === 'string' && (stored.role === 'patient' || stored.role === 'doctor' || stored.role === 'admin') ? { id: stored.id, role: stored.role } : null;
+    } catch { return null; }
   });
   const account = accounts.find((item) => item.id === session?.id);
   useEffect(() => { if (session) sessionStorage.setItem('ddt.session.v1', JSON.stringify(session)); else sessionStorage.removeItem('ddt.session.v1'); }, [session]);
@@ -146,10 +149,10 @@ export default function App() {
             const remote = remoteAccounts.find((item) => item.id === local.id);
             if (!remote || JSON.stringify(local.patientProfile) === JSON.stringify(remote.patientProfile) && JSON.stringify(local.doctorProfile) === JSON.stringify(remote.doctorProfile)) return local;
             changed = true;
-            return { ...local, ...remote, password: local.password } as Account;
+            return { ...local, ...remote };
           });
           for (const remote of remoteAccounts) if (!result.some((local) => local.id === remote.id)) {
-            result.push({ ...remote, password: '' } as Account);
+            result.push(remote);
             changed = true;
           }
           return changed ? result : current;
@@ -233,7 +236,7 @@ export default function App() {
       try {
         const response = await fetch('/api/doctors');
         if (!response.ok) throw new Error('Doctor directory request failed');
-        const result = await response.json() as { doctors: Omit<Account, 'password'>[]; ratings: DoctorRating[] };
+        const result = await response.json() as { doctors: Account[]; ratings: DoctorRating[] };
         setRatings(result.ratings);
         setAccounts((current) => mergePublicDoctors(current, result.doctors));
         setDirectoryError(null);
@@ -310,30 +313,21 @@ export default function App() {
       setSession({ id: 'admin', role: 'admin' });
       return null;
     }
-    const found = accounts.find((item) => item.email.toLowerCase() === identifier.toLowerCase() && item.role === mode && item.password === password);
-    if (found) {
-      try {
-        const remote = await loginAccount(found.email, password, mode);
-        setAccounts((current) => current.map((item) => item.id === remote.id ? { ...remote, password } as Account : item));
-        setSession({ id: remote.id, role: remote.role });
-      } catch { return 'Incorrect email or password, or sync service unavailable.'; }
-      return null;
-    }
     try {
-      const remote = await loginAccount(identifier, password, mode);
-      setAccounts((current) => current.some((item) => item.id === remote.id) ? current.map((item) => item.id === remote.id ? { ...remote, password } as Account : item) : [...current, { ...remote, password } as Account]);
+      const remote = await loginAccount({ email: identifier, password, role: mode });
+      setAccounts((current) => current.some((item) => item.id === remote.id) ? current.map((item) => item.id === remote.id ? remote : item) : [...current, remote]);
       setSession({ id: remote.id, role: mode });
-    } catch { return 'Incorrect email or password, or sync service unavailable.'; }
+    } catch (error) { return authenticationErrorMessage(error); }
     return null;
   };
-  const register = async (newAccount: Account) => {
-    if (newAccount.email.toLowerCase() === 'admin' || accounts.some((item) => item.email.toLowerCase() === newAccount.email.toLowerCase())) return 'An account with this email already exists.';
+  const register = async (request: PatientRegistrationRequest) => {
+    if (request.account.email.toLowerCase() === 'admin' || accounts.some((item) => item.email.toLowerCase() === request.account.email.toLowerCase())) return 'An account with this email already exists.';
     try {
-      const created = await bridgeAccount(newAccount);
-      setAccounts((current) => [...current, { ...created.account, password: newAccount.password } as Account]);
+      const created = await bridgeAccount(request);
+      setAccounts((current) => [...current, created.account]);
       if (created.assignment) setAssignments((current) => [created.assignment!, ...current]);
       setSession({ id: created.account.id, role: created.account.role });
-    } catch { return 'Sync service is unavailable. Start PostgreSQL and run npm run dev:api.'; }
+    } catch (error) { return authenticationErrorMessage(error); }
     return null;
   };
   const loginProps = { accounts, ratings, onSignIn: signIn, onRegister: register };
@@ -348,7 +342,7 @@ export default function App() {
     <Route path="/*" element={session && (session.role === 'admin' || account) ? <Shell session={session} account={account} accounts={accounts} assignments={assignments} assignmentActions={assignmentActions} onAssignmentDecision={decideAssignment} onRequestDoctor={chooseDoctor} ratings={ratings} setRatings={setRatings} allPatients={allPatients} patientProfiles={patientProfiles} messages={visibleMessages} setMessages={setMessages} foodEntries={visibleFood} setFoodEntries={setFoodEntries} bolusEntries={visibleBolus} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} syncError={displayedSyncError} directoryError={directoryError} onUpdateAccount={async (updated) => {
       try {
         const result = await updateAccountProfile(updated);
-        setAccounts((current) => current.map((item) => item.id === updated.id ? { ...result.account, password: item.password } as Account : item));
+        setAccounts((current) => current.map((item) => item.id === updated.id ? result.account : item));
         return null;
       } catch (error) { return error instanceof Error ? error.message : 'Could not save the profile.'; }
     }} onSignOut={() => { sessionStorage.removeItem('ddt.sync.token'); setSession(null); }} /> : <Navigate to="/login" replace />} />

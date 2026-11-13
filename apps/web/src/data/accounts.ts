@@ -4,7 +4,7 @@ import demoPatient from './demoPatient.json';
 
 export const seedAccounts: Account[] = [
   {
-    id: 'DR-001', role: 'doctor', email: 'sarah.ahmed@clinic.example', password: 'password',
+    id: 'DR-001', role: 'doctor', email: 'sarah.ahmed@clinic.example',
     doctorProfile: {
       fullName: 'Dr. Sarah Ahmed', specialty: 'Endocrinology', yearsExperience: '12',
       medicalSchool: 'Cairo University Faculty of Medicine', qualifications: 'Endocrinology and diabetes care',
@@ -13,7 +13,7 @@ export const seedAccounts: Account[] = [
     },
   },
   {
-    id: 'DR-002', role: 'doctor', email: 'khaled.mansour@clinic.example', password: 'password',
+    id: 'DR-002', role: 'doctor', email: 'khaled.mansour@clinic.example',
     doctorProfile: {
       fullName: 'Dr. Khaled Mansour', specialty: 'Diabetology', yearsExperience: '18',
       medicalSchool: 'Alexandria University Faculty of Medicine', qualifications: 'Diabetes and metabolic care',
@@ -22,7 +22,7 @@ export const seedAccounts: Account[] = [
     },
   },
   {
-    id: 'DR-003', role: 'doctor', email: 'reem.osman@clinic.example', password: 'password',
+    id: 'DR-003', role: 'doctor', email: 'reem.osman@clinic.example',
     doctorProfile: {
       fullName: 'Dr. Reem Osman', specialty: 'Internal Medicine', yearsExperience: '10',
       medicalSchool: 'Ain Shams University Faculty of Medicine', qualifications: 'Internal medicine and diabetes management',
@@ -31,7 +31,7 @@ export const seedAccounts: Account[] = [
     },
   },
   {
-    id: 'DR-004', role: 'doctor', email: 'nada.yassin@clinic.example', password: 'password',
+    id: 'DR-004', role: 'doctor', email: 'nada.yassin@clinic.example',
     doctorProfile: {
       fullName: 'Dr. Nada Yassin', specialty: 'Endocrinology', yearsExperience: '14',
       medicalSchool: 'Cairo University Faculty of Medicine', qualifications: 'Endocrinology and continuous glucose monitoring',
@@ -40,7 +40,7 @@ export const seedAccounts: Account[] = [
     },
   },
   {
-    id: 'omar-hassan', role: 'patient', email: 'omar.hassan@example.com', password: 'password',
+    id: 'omar-hassan', role: 'patient', email: 'omar.hassan@example.com',
     patientProfile: {
       fullName: 'Omar Hassan', age: '34', weight: '82', height: '178', diabetesType: 'Type 1 Diabetes',
       insulinPlan: 'Basal-bolus therapy', diagnosisYear: '2012', medications: 'Insulin', allergies: 'None reported',
