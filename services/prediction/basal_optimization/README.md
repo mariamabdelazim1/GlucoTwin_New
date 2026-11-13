@@ -80,3 +80,33 @@ intersects relative and absolute bounds, omits non-grid endpoints, and verifies
 that unique rates remain distinct in the simulator's float32 dtype. Candidate
 metadata includes patient/time references, effective bounds, deterministic IDs,
 the baseline candidate ID, configuration version/hash, and count.
+
+## Candidate physiological inputs
+
+`candidate_inputs.py` materializes inputs only; it does not run the simulator.
+It validates snapshot/candidate identity, timestamps, baseline metadata, and
+recorded values before returning one independent float32 `(576, 3)` tensor per
+candidate in this fixed order:
+
+1. `basal_rate_u_per_hour` — candidate rate repeated unchanged, in U/hour;
+2. `bolus_u` — recorded delivered units in that interval; and
+3. `consumed_carbs_g` — recorded grams consumed in that interval.
+
+Each row represents `[timestamp, timestamp + 5 minutes)`. Input timestamps run
+from `S` through `T - 5 minutes`; expected output timestamps run from `S + 5
+minutes` through `T`. Events at `S` remain in row zero, while events at `T` and
+initialization-history events are excluded. Announced `carbs_g` never becomes
+physiological ingestion, and no meal-consumption profile is applied.
+
+```python
+from basal_optimization import build_candidate_inputs
+
+candidate_inputs = build_candidate_inputs(snapshot, candidate_set)
+```
+
+Each candidate receives independently stored inputs, initial state `(10,)`, and
+fixed parameters `(7,)`. The builder reports basal, bolus, and carbohydrate
+totals for accounting but does not include predictions, scores, or selection.
+The baseline candidate repeats the exact first recorded reference before
+float32 conversion; permitted sub-`1e-9 U/hour` raw differences are therefore
+replaced by that constant and are not averaged or silently copied.

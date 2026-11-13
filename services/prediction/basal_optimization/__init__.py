@@ -11,6 +11,12 @@ from .candidate_generation import (
     generate_basal_candidates,
     load_search_configuration,
 )
+from .candidate_inputs import (
+    PHYSIOLOGICAL_INPUT_UNITS,
+    BasalCandidateInputBatch,
+    CandidatePhysiologicalInputs,
+    build_candidate_inputs,
+)
 
 from .preparation import (
     DEFAULT_DATASET_PATH,
@@ -29,16 +35,20 @@ __all__ = [
     "BASELINE_CONSTANCY_ABSOLUTE_TOLERANCE_U_PER_HOUR",
     "EXAMPLE_CONFIGURATION_PATH",
     "BasalCandidateSet",
+    "BasalCandidateInputBatch",
     "BasalRateCandidate",
     "BasalSearchConfiguration",
+    "CandidatePhysiologicalInputs",
     "DEFAULT_DATASET_PATH",
     "BasalPreparationError",
     "HistoricalWindows",
     "PatientIdentity",
+    "PHYSIOLOGICAL_INPUT_UNITS",
     "PreparedBasalSnapshot",
     "SnapshotClone",
     "ValidationOutcome",
     "build_historical_windows",
+    "build_candidate_inputs",
     "configuration_hash",
     "extract_constant_baseline_rate",
     "generate_basal_candidates",
