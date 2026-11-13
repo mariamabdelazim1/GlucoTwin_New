@@ -1,8 +1,9 @@
 # Retrospective basal preparation
 
-This package implements steps 1–3 only: timestamped historical windows,
-validation, and frozen GRU–Hovorka initialization. It does not generate,
-simulate, score, or select a basal candidate.
+This package implements timestamped historical preparation, frozen GRU–Hovorka
+initialization, constant-rate candidate generation, physiological-input
+construction, and numerical replay. It does not score, rank, select, recommend,
+or deliver a basal rate.
 
 For a decision timestamp `T`, simulation starts at `S = T - 48 hours`. The
 required 72 hours are kept as distinct half-open windows:
@@ -110,3 +111,32 @@ totals for accounting but does not include predictions, scores, or selection.
 The baseline candidate repeats the exact first recorded reference before
 float32 conversion; permitted sub-`1e-9 U/hour` raw differences are therefore
 replaced by that constant and are not averaged or silently copied.
+
+## Continuous 48-hour simulation
+
+`simulation.py` consumes only a validated `BasalCandidateInputBatch` and calls
+the authoritative `bolus_optimization.physiology.predict_from_state` function.
+Each candidate is advanced continuously through all 576 five-minute intervals
+using its constant basal, recorded delivered boluses, and recorded
+`consumed_carbs_g`. No announced carbohydrate, meal ledger, recorded replay
+CGM, GRU refresh, or parameter fitting enters state propagation.
+
+```python
+from basal_optimization import simulate_candidate_batch
+
+simulation = simulate_candidate_batch(candidate_inputs, candidate_batch_size=8)
+```
+
+The first glucose output aligns to `S + 5 minutes` and the last to `T`. All ten
+state compartments carry across the 24-hour boundary without reinitialization;
+the seven parameters remain fixed. Runtime settings are explicitly 70 kg,
+float32, five-minute intervals, and five integration substeps. Candidate
+batching bounds memory use but does not split a candidate's 576-interval state
+trajectory.
+
+Results preserve the 576 timestamp positions, partial finite predictions, the
+first failing interval/substep/reason, roundoff corrections, and NaNs after a
+numerical failure. State trajectories are not returned. A
+`simulation_valid` result means only that the numerical validity rules passed;
+it does not establish clinical safety, effectiveness, or 48-hour predictive
+accuracy. No scores, ranks, selected rate, or recommendation are produced.
