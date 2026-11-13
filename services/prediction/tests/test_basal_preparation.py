@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -69,6 +70,36 @@ def prepare(frame: pd.DataFrame):
 
 
 class BasalWindowTests(unittest.TestCase):
+    def test_microsecond_and_nanosecond_storage_precision_both_pass(self):
+        for unit in ("us", "ns"):
+            frame = fixture()
+            frame["timestamp"] = pd.DatetimeIndex(frame["timestamp"]).as_unit(unit)
+            with self.subTest(unit=unit):
+                windows = build_historical_windows(frame, IDENTITY, DECISION)
+                self.assertEqual(len(windows.initialization_intervals), 288)
+                self.assertEqual(len(windows.replay_intervals), 576)
+
+    def test_microsecond_parquet_round_trip_passes(self):
+        frame = fixture()
+        frame["timestamp"] = pd.DatetimeIndex(frame["timestamp"]).as_unit("us")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "microsecond-history.parquet"
+            frame.to_parquet(path, index=False)
+            restored = pd.read_parquet(path)
+        self.assertIn("[us]", str(restored["timestamp"].dtype))
+        windows = build_historical_windows(restored, IDENTITY, DECISION)
+        self.assertEqual(len(windows.initialization_intervals), 288)
+        self.assertEqual(len(windows.replay_intervals), 576)
+
+    def test_genuinely_shifted_timestamp_is_rejected_at_either_precision(self):
+        for unit in ("us", "ns"):
+            frame = fixture()
+            frame["timestamp"] = pd.DatetimeIndex(frame["timestamp"]).as_unit(unit)
+            frame.loc[100, "timestamp"] += pd.Timedelta(microseconds=1)
+            with self.subTest(unit=unit):
+                with self.assertRaisesRegex(BasalPreparationError, "coverage"):
+                    build_historical_windows(frame, IDENTITY, DECISION)
+
     def test_exact_lengths_boundaries_and_decision_row_exclusion(self):
         windows = build_historical_windows(fixture(), IDENTITY, DECISION)
         self.assertEqual(len(windows.initialization_intervals), 288)
@@ -127,6 +158,16 @@ class BasalWindowTests(unittest.TestCase):
         with self.assertRaisesRegex(BasalPreparationError, "timezone convention"):
             build_historical_windows(fixture(), IDENTITY, DECISION.tz_localize("UTC"))
 
+        aware = fixture()
+        aware["timestamp"] = (
+            pd.DatetimeIndex(aware["timestamp"])
+            .tz_localize("Africa/Cairo")
+            .as_unit("us")
+        )
+        aware_decision = DECISION.tz_localize("Africa/Cairo")
+        windows = build_historical_windows(aware, IDENTITY, aware_decision)
+        self.assertEqual(str(windows.replay_intervals["timestamp"].dt.tz), "Africa/Cairo")
+
     def test_missing_or_ambiguous_identity_and_mixed_split_are_rejected(self):
         with self.assertRaisesRegex(BasalPreparationError, "patient identity not found"):
             build_historical_windows(fixture(), PatientIdentity("synthetic", "absent"), DECISION)
@@ -134,6 +175,51 @@ class BasalWindowTests(unittest.TestCase):
         mixed.loc[100, "split"] = "testing"
         with self.assertRaisesRegex(BasalPreparationError, "split"):
             build_historical_windows(mixed, IDENTITY, DECISION)
+
+    def test_continuous_record_changes_are_rejected_throughout_required_window(self):
+        cases = (
+            (10, "inside initialization"),
+            (288, "exactly at S"),
+            (500, "inside replay"),
+        )
+        for change_index, location in cases:
+            frame = fixture()
+            frame["continuous_record_id"] = "record-a"
+            frame.loc[change_index:, "continuous_record_id"] = "record-b"
+            with self.subTest(location=location):
+                with self.assertRaisesRegex(
+                    BasalPreparationError,
+                    "crosses continuous_record_id boundaries.*found IDs",
+                ):
+                    build_historical_windows(frame, IDENTITY, DECISION)
+
+    def test_missing_continuous_record_id_is_rejected_actionably(self):
+        frame = fixture()
+        frame["continuous_record_id"] = "record-a"
+        frame.loc[100, "continuous_record_id"] = None
+        with self.assertRaisesRegex(
+            BasalPreparationError,
+            "continuous_record_id is missing.*T - 72 hours, T",
+        ):
+            build_historical_windows(frame, IDENTITY, DECISION)
+
+    def test_constant_or_absent_continuous_record_id_is_accepted(self):
+        absent = build_historical_windows(fixture(), IDENTITY, DECISION)
+        self.assertEqual(len(absent.replay_intervals), 576)
+        constant = fixture()
+        constant["continuous_record_id"] = "record-a"
+        present = build_historical_windows(constant, IDENTITY, DECISION)
+        self.assertEqual(len(present.initialization_intervals), 288)
+        self.assertEqual(set(present.replay_intervals["continuous_record_id"]), {"record-a"})
+
+    def test_continuous_record_change_at_t_is_excluded(self):
+        frame = fixture()
+        frame["continuous_record_id"] = "record-a"
+        frame.loc[frame["timestamp"].eq(DECISION), "continuous_record_id"] = "record-b"
+        windows = build_historical_windows(frame, IDENTITY, DECISION)
+        self.assertEqual(set(windows.initialization_intervals["continuous_record_id"]), {"record-a"})
+        self.assertEqual(set(windows.replay_intervals["continuous_record_id"]), {"record-a"})
+        self.assertEqual(windows.outcome_row_at_decision["continuous_record_id"], "record-b")
 
 
 class BasalInitializationTests(unittest.TestCase):

@@ -165,7 +165,14 @@ def _coverage_reason(
 ) -> str | None:
     expected = pd.date_range(start=start, periods=expected_count, freq=INTERVAL)
     actual = pd.DatetimeIndex(frame["timestamp"])
-    if len(actual) == expected_count and actual.equals(expected):
+    # Parquet commonly preserves timestamps as datetime64[us], while
+    # date_range may produce datetime64[ns].  DatetimeIndex.equals() treats
+    # those storage dtypes as unequal even when every timestamp value matches.
+    # Upcasting both indexes compares exact values without rounding and keeps
+    # timezone information attached to timezone-aware indexes.
+    comparable_actual = actual.as_unit("ns")
+    comparable_expected = expected.as_unit("ns")
+    if len(actual) == expected_count and comparable_actual.equals(comparable_expected):
         return None
     missing = expected.difference(actual)
     extra = actual.difference(expected)
@@ -293,6 +300,21 @@ def build_historical_windows(
         for source_column in ("source_run_id", "source_record_id"):
             if source_column in combined.columns and combined[source_column].nunique(dropna=False) != 1:
                 reasons.append(f"window crosses {source_column} boundaries")
+        if "continuous_record_id" in combined.columns:
+            continuous_record_ids = combined["continuous_record_id"]
+            missing_ids = continuous_record_ids.isna()
+            if missing_ids.any():
+                locations = combined.loc[missing_ids, "timestamp"].astype(str).head(5).tolist()
+                reasons.append(
+                    "continuous_record_id is missing within the required "
+                    f"[T - 72 hours, T) window at {locations}"
+                )
+            elif continuous_record_ids.nunique() != 1:
+                values = continuous_record_ids.drop_duplicates().head(5).tolist()
+                reasons.append(
+                    "window crosses continuous_record_id boundaries within the required "
+                    f"[T - 72 hours, T) window; found IDs {values}"
+                )
 
     if reasons:
         raise BasalPreparationError(reasons)
