@@ -9,14 +9,13 @@ from pathlib import Path
 
 from .candidate_inputs import ConsumptionConfiguration, load_consumption_configuration
 from .candidate_search import BolusSearchConfiguration
+from .configuration_loading import DEFAULT_RESEARCH_CONFIGURATION
 from .events import TriggerConfiguration
 from .parameter_updates import RefreshConfiguration
 from .scoring import ScoringConfiguration
 
 
-DEFAULT_MIGRATED_CONFIGURATION = Path(__file__).with_name(
-    "migrated_selected_configuration.json"
-)
+DEFAULT_MIGRATED_CONFIGURATION = DEFAULT_RESEARCH_CONFIGURATION
 
 
 @dataclass(frozen=True)
@@ -45,6 +44,13 @@ def load_migrated_configuration(
     if payload["residual"].get("affects_candidate_scoring") is not False \
             or payload["residual"].get("affects_state_propagation") is not False:
         raise ValueError("Residual diagnostics cannot affect optimization physiology")
+    candidate_scoring = payload.get("candidate_scoring")
+    if candidate_scoring is not None and (
+        candidate_scoring.get("trajectory_source") != "raw_hovorka"
+        or candidate_scoring.get("gated_endpoint_enabled") is not False
+        or candidate_scoring.get("residual_correction_enabled") is not False
+    ):
+        raise ValueError("Migrated candidate scoring must use the raw Hovorka trajectory")
 
     trigger = TriggerConfiguration(**payload["trigger"])
     search = BolusSearchConfiguration(**payload["search"])

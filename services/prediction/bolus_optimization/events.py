@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -14,13 +13,16 @@ import pandas as pd
 import torch
 
 from .configuration import SAMPLE_INTERVAL_MINUTES
+from .configuration_loading import (
+    DEFAULT_RESEARCH_CONFIGURATION, load_component_payload,
+)
 from .history import current_glucose_mg_dl
 
 if TYPE_CHECKING:
     from .episodes import ArmState, EpisodeDefinition, IntervalEvents
 
 
-DEFAULT_TRIGGER_CONFIGURATION = Path(__file__).with_name("trigger_configuration_v1.json")
+DEFAULT_TRIGGER_CONFIGURATION = DEFAULT_RESEARCH_CONFIGURATION
 ACKNOWLEDGEMENT_STATUSES = {"completed", "cancelled", "failed"}
 RETRY_POLICIES = {"no_retry_until_glucose_resets", "caller_managed_retry"}
 
@@ -53,11 +55,9 @@ class TriggerConfiguration:
 
 
 def load_trigger_configuration(path: str | Path = DEFAULT_TRIGGER_CONFIGURATION):
-    path = Path(path)
-    raw = path.read_bytes()
-    payload = json.loads(raw)
+    _, _, payload, content_hash = load_component_payload(path, "trigger")
     configuration = TriggerConfiguration(**payload)
-    return configuration, hashlib.sha256(raw).hexdigest()
+    return configuration, content_hash
 
 
 @dataclass(frozen=True)

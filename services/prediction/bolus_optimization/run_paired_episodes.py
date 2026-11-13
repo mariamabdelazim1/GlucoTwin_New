@@ -758,7 +758,9 @@ def run_continuous_diagnostic(
     return summary
 
 
-def main():
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Build the standalone CLI while preserving explicit component overrides."""
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset")
     parser.add_argument("--checkpoint", default="baseline/model.pt")
@@ -771,6 +773,11 @@ def main():
     parser.add_argument("--refresh-minutes", type=int, default=120)
     parser.add_argument("--weight-kg", type=float, default=70.0)
     parser.add_argument("--substeps", type=int, default=5)
+    return parser
+
+
+def main():
+    parser = build_argument_parser()
     args = parser.parse_args()
     if args.episodes_per_patient < 0 or args.weight_kg <= 0 or args.substeps <= 0:
         parser.error("episode count must be nonnegative; weight and substeps must be positive")

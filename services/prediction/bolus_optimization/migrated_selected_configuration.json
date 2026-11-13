@@ -1,6 +1,6 @@
 {
-  "configuration_version": "migrated-final-adapter-v1",
-  "configuration_id": "expanded_grid_v1",
+  "configuration_version": "expanded-research-default-v1",
+  "configuration_id": "expanded_20u_no_insulin_penalty_v1",
   "status": "resolved_from_source_but_requires_renewed_final_model_validation",
   "source_selection": {
     "project": "/Users/mariammohamed/Documents/uni/sem8/grad/GlucoTwin_GRU_Hovorka",
@@ -17,12 +17,12 @@
     "intended_use": "Migrated unchanged for renewed experimental validation."
   },
   "search": {
-    "configuration_version": "step13-expanded_grid_v1",
-    "maximum_bolus_u": 3.0,
+    "configuration_version": "expanded_20u_no_insulin_penalty_v1",
+    "maximum_bolus_u": 20.0,
     "bolus_increment_u": 0.5,
-    "maximum_candidate_count": 16,
+    "maximum_candidate_count": 41,
     "candidate_batch_size": 4,
-    "intended_use": "Migrated unchanged research grid; not a safe-dose limit."
+    "intended_use": "Default research-only Hovorka simulation grid. The 20 U ceiling is an experimental search bound, not a validated safe-dose limit."
   },
   "scoring": {
     "configuration_version": "scoring-v1",
@@ -33,14 +33,14 @@
     "low_weight": 4.0,
     "high_weight": 1.0,
     "severe_low_weight": 10.0,
-    "insulin_weight": 0.05,
+    "insulin_weight": 0.0,
     "terminal_weight": 1.0,
     "glucose_scale_mg_dl": 50.0,
     "insulin_scale_u": 2.0,
     "terminal_window_minutes": 30,
     "absolute_tie_tolerance": 1e-9,
     "relative_tie_tolerance": 1e-9,
-    "intended_use": "Migrated unchanged simulation-only score."
+    "intended_use": "Default research-only raw Hovorka trajectory score with zero insulin penalty; low-glucose penalties and feasibility rejection remain active."
   },
   "consumption": {
     "path": "bolus_optimization/consumption_configuration_v1.json",
@@ -56,15 +56,31 @@
     "dtype": "torch.float32",
     "candidate_horizon_minutes": 240
   },
+  "candidate_scoring": {
+    "trajectory_source": "raw_hovorka",
+    "gated_endpoint_enabled": false,
+    "residual_correction_enabled": false
+  },
   "residual": {
     "enabled": false,
     "scope": "diagnostic 60-minute endpoint only",
     "affects_candidate_scoring": false,
     "affects_state_propagation": false
   },
-  "exploratory_configuration": {
+  "research_default": {
     "path": "bolus_optimization/expanded_20u_no_insulin_penalty_v1.json",
-    "active_by_default": false,
-    "note": "Post-test exploratory 20 U grid retained separately and never merged into the active migrated configuration."
+    "active_by_default": true,
+    "scope": "Research bolus optimizer entry points only; not connected to web, mobile, automatic delivery, or clinical dosing.",
+    "historical_policy_path": "bolus_optimization/historical_migrated_selected_configuration_v1.json",
+    "evidence": {
+      "label": "EXPLORATORY_WITH_DATASET_HASH_MISMATCH",
+      "patients": 23,
+      "episodes_attempted": 3950,
+      "matched_complete_pairs": 3949,
+      "simulator_validity_failures": 1,
+      "testing_patients_used": false,
+      "dataset_hash_mismatch_override_used": true,
+      "interpretation": "Reported internal exploratory simulation results only; not independent validation, final test-set validation, or evidence that 20 U is a clinically safe maximum."
+    }
   }
 }

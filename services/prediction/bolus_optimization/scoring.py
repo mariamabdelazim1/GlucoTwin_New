@@ -6,8 +6,6 @@ event, mutate a simulation, create a delivery or evaluate clinical safety.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import numbers
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,10 +19,13 @@ from .candidate_search import (
     generate_bolus_candidates,
 )
 from .configuration import PREDICTION_HORIZON_STEPS, SAMPLE_INTERVAL_MINUTES
+from .configuration_loading import (
+    DEFAULT_RESEARCH_CONFIGURATION, load_component_payload,
+)
 from .physiology import _normalize_state
 
 
-DEFAULT_SCORING_CONFIGURATION = Path(__file__).with_name("scoring_configuration_v1.json")
+DEFAULT_SCORING_CONFIGURATION = DEFAULT_RESEARCH_CONFIGURATION
 
 
 def _number(value, name: str, *, positive: bool = False, nonnegative: bool = False) -> float:
@@ -95,9 +96,8 @@ class ScoringConfiguration:
 
 
 def load_scoring_configuration(path: str | Path = DEFAULT_SCORING_CONFIGURATION):
-    path = Path(path)
-    raw = path.read_bytes()
-    return ScoringConfiguration(**json.loads(raw)), hashlib.sha256(raw).hexdigest()
+    _, _, payload, content_hash = load_component_payload(path, "scoring")
+    return ScoringConfiguration(**payload), content_hash
 
 
 @dataclass(frozen=True)
