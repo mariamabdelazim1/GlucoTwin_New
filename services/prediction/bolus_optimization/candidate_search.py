@@ -23,10 +23,13 @@ from .candidate_inputs import (
     DecisionSnapshot, KnownBasalSchedule, build_candidate_inputs,
     validate_decision_snapshot,
 )
+from .configuration_loading import (
+    DEFAULT_RESEARCH_CONFIGURATION, load_component_payload,
+)
 from .physiology import STATE_NAMES, _normalize_state, predict_from_state
 
 
-DEFAULT_SEARCH_CONFIGURATION = Path(__file__).with_name("bolus_search_configuration_v1.json")
+DEFAULT_SEARCH_CONFIGURATION = DEFAULT_RESEARCH_CONFIGURATION
 
 
 def _finite_number(value, name: str, *, positive: bool = False) -> float:
@@ -75,9 +78,8 @@ class BolusSearchConfiguration:
 
 
 def load_search_configuration(path: str | Path = DEFAULT_SEARCH_CONFIGURATION):
-    path = Path(path)
-    raw = path.read_bytes()
-    return BolusSearchConfiguration(**json.loads(raw)), hashlib.sha256(raw).hexdigest()
+    _, _, payload, content_hash = load_component_payload(path, "search")
+    return BolusSearchConfiguration(**payload), content_hash
 
 
 def _decimal(value: float, name: str) -> Decimal:

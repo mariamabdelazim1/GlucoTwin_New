@@ -20,6 +20,7 @@ import pandas as pd
 import torch
 
 from .configuration import PREDICTION_HORIZON_STEPS, SAMPLE_INTERVAL_MINUTES
+from .configuration_loading import DEFAULT_RESEARCH_CONFIGURATION
 from .physiology import (
     PARAMETER_NAMES, PHYSIOLOGICAL_INPUT_NAMES, STATE_NAMES,
     _normalize_state, _parameter_reason,
@@ -30,9 +31,7 @@ if TYPE_CHECKING:
     from .events import EvaluationEvent, EventDetectorState
 
 
-DEFAULT_CONSUMPTION_CONFIGURATION = Path(__file__).with_name(
-    "consumption_configuration_v1.json"
-)
+DEFAULT_CONSUMPTION_CONFIGURATION = DEFAULT_RESEARCH_CONFIGURATION
 INTERVAL = pd.Timedelta(minutes=SAMPLE_INTERVAL_MINUTES)
 MEAL_QUANTITY_TOLERANCE_G = 1e-6
 
@@ -88,6 +87,17 @@ def load_consumption_configuration(path: str | Path = DEFAULT_CONSUMPTION_CONFIG
     path = Path(path)
     raw = path.read_bytes()
     payload = json.loads(raw)
+    if "consumption" in payload:
+        reference = payload["consumption"]
+        referenced_path = Path(reference["path"])
+        if not referenced_path.is_absolute():
+            referenced_path = path.parent.parent / referenced_path
+        referenced_raw = referenced_path.read_bytes()
+        referenced_hash = hashlib.sha256(referenced_raw).hexdigest()
+        if referenced_hash != reference["sha256"]:
+            raise ValueError("Consumption configuration hash mismatch")
+        payload = json.loads(referenced_raw)
+        raw = referenced_raw
     payload["interval_fractions"] = tuple(payload["interval_fractions"])
     return ConsumptionConfiguration(**payload), hashlib.sha256(raw).hexdigest()
 
