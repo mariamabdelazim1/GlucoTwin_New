@@ -47,3 +47,12 @@ python -m bolus_optimization.run_paired_episodes model_ready_5min.parquet \
 The paired runner performs strict dataset/checkpoint verification. The mismatch override in `run_expanded_exploratory_bolus.py` is scoped only to that archived exploratory experiment and is not a normal optimizer default.
 
 An HTTP application layer will be added here; clients must access it through `services/api`, not directly.
+
+## Retrospective basal preparation
+
+Steps 1–3 of the retrospective basal design are implemented in
+`basal_optimization/`. They use only the repository-relative
+`services/prediction/model_ready_5min.parquet`, require 72 complete hours before
+the decision boundary, build separate 24-hour initialization and 48-hour replay
+windows, and initialize the frozen 70 kg GRU–Hovorka twin at the replay start.
+See `basal_optimization/README.md` for boundaries, units, provenance, and usage.
