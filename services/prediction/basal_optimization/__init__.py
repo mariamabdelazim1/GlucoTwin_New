@@ -45,6 +45,7 @@ from .reliability import (
     GlucoseFitMetrics,
     ReliabilityCriteria,
     assess_baseline_reliability,
+    calculate_glucose_fit_metrics,
     load_reliability_criteria,
 )
 from .development_reliability import (
@@ -90,6 +91,7 @@ __all__ = [
     "GlucoseFitMetrics",
     "ReliabilityCriteria",
     "assess_baseline_reliability",
+    "calculate_glucose_fit_metrics",
     "build_historical_windows",
     "build_candidate_inputs",
     "configuration_hash",

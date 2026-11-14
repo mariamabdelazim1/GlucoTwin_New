@@ -174,3 +174,43 @@ and reports pooled-window distributions separately from equally weighted
 per-patient distributions. It does not derive thresholds from the errors it
 evaluates; callers must supply separately justified provisional criteria or
 retain the uncalibrated status.
+
+## Long-rollout diagnostics
+
+`diagnostics.py` is a development-only, baseline-only diagnostic entry point:
+
+```bash
+python -m basal_optimization.diagnostics --maximum-development-patients 4
+```
+
+It selects at most four deterministic development patients, adds the known
+development example `PadovaBaseline/adult#004` when needed, loads the dataset
+and checkpoint once, and simulates only the explicitly flagged unchanged-basal
+candidate. It reports cumulative errors at 2, 4, 6, 12, 24, and 48 hours plus
+successive non-overlapping four-hour blocks. Every value is a slice of the same
+continuous trajectory; prefixes are not reinitialized or rerun.
+
+The diagnostic audits exact input preservation, five-minute timestamp cadence,
+CGM measurement age, event-adjacent errors, initialization state and parameter
+values, parameter-bound proximity, and the fixed 70 kg contract. Generated
+JSON, Markdown, and plots are written under the ignored
+`services/prediction/results/basal_diagnostics/` directory.
+
+The inspected native training code establishes these important limits:
+
+- the GRU consumes 288 completed five-minute history rows plus the current
+  boundary row;
+- physiological history uses only the last six hours and replaces Q1 with the
+  next recorded CGM after every historical advance;
+- native training supplies announced `carbs_g` to both historical and future
+  physiology, whereas the current runtime intentionally supplies
+  `consumed_carbs_g` to both physiological phases;
+- the declared training forecast is 24 outputs, or 120 minutes, with one fixed
+  parameter estimate and no future glucose correction; and
+- checkpoint selection metrics are explicitly scoped to 5–60 minutes.
+
+The 48-hour basal replay instead holds the estimate fixed for 576 outputs with
+no observation correction. That is a documented extrapolation beyond the
+training and checkpoint-selection horizons, not evidence of a simulator bug.
+Diagnostic results do not alter the uncalibrated reliability criteria and
+cannot authorize future selection.

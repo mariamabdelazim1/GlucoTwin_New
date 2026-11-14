@@ -222,7 +222,19 @@ def _measurement_reason(measurement: object, availability: pd.Timestamp) -> tupl
     return timestamp, None
 
 
-def _metrics(predicted: np.ndarray, observed: np.ndarray) -> GlucoseFitMetrics:
+def calculate_glucose_fit_metrics(
+    predicted: np.ndarray, observed: np.ndarray
+) -> GlucoseFitMetrics:
+    """Calculate the canonical baseline-fit metrics in float64."""
+
+    predicted = np.asarray(predicted, dtype=np.float64)
+    observed = np.asarray(observed, dtype=np.float64)
+    if predicted.ndim != 1 or observed.ndim != 1 or predicted.shape != observed.shape:
+        raise ValueError("Predicted and observed glucose must be equal-length 1-D arrays")
+    if not len(predicted):
+        raise ValueError("At least one matched glucose observation is required")
+    if not np.isfinite(predicted).all() or not np.isfinite(observed).all():
+        raise ValueError("Predicted and observed glucose must be finite")
     error = predicted.astype(np.float64) - observed.astype(np.float64)
     absolute = np.abs(error)
     values = (
@@ -349,9 +361,9 @@ def assess_baseline_reliability(
             raise ValueError("Endpoint error is nonfinite")
     if prediction_complete and coverage.complete:
         observed = np.asarray(observed_values, dtype=np.float64)
-        full_metrics = _metrics(predicted, observed)
-        day0_metrics = _metrics(predicted[:288], observed[:288])
-        day1_metrics = _metrics(predicted[288:], observed[288:])
+        full_metrics = calculate_glucose_fit_metrics(predicted, observed)
+        day0_metrics = calculate_glucose_fit_metrics(predicted[:288], observed[:288])
+        day1_metrics = calculate_glucose_fit_metrics(predicted[288:], observed[288:])
 
     criterion_results: list[ReliabilityCriterionResult] = []
     criteria_configuration_hash = criteria_hash(criteria) if criteria is not None else None
