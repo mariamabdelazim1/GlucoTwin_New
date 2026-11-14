@@ -701,7 +701,7 @@ def _markdown(payload: dict[str, Any]) -> str:
         f"frozen model unchanged: {payload['source_immutability']['frozen_model_state_unchanged']}.",
         f"- The patient-equal A−C MAE was {value(summary['equally_weighted_patient_summary']['mae_mg_dl']['mean'])} mg/dL, "
         f"with {outcomes['announced_better']} announced wins and {outcomes['consumed_better']} consumed wins. "
-        "This supports heterogeneous, near-zero average short-horizon effect in this selected pilot, not equivalence.",
+        "The direction and magnitude are reported descriptively and do not establish equivalence.",
         "- This comparison combines initialization and forecast convention changes and cannot attribute their effects separately.",
         "- This small selected pilot provides descriptive evidence only. It does not establish statistical significance, clinical superiority, deployable future-meal knowledge, or reliable 48-hour prediction.",
         "- Smallest next diagnostic: repeat paired arms while changing only initialization carbohydrate, then only forecast carbohydrate, on the same fixed origins and parameters.",

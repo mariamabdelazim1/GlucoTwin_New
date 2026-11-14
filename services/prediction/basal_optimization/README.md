@@ -240,3 +240,20 @@ Paired differences are Arm A minus Arm C; negative MAE or RMSE favors announced
 physiology for that retrospective window. This diagnostic uses recorded future
 events, combines initialization and forecast effects, and cannot authorize
 selection or establish 48-hour reliability.
+
+### Historical replay-length diagnostic
+
+`historical_replay_diagnostic.py` compares the existing continuous 48-hour
+unchanged-basal replay with independent two-, four-, and six-hour historical
+replays. Protocol B repeatedly initializes from the preceding six recorded
+hours while retaining the original parameter vector; Protocol C also refreshes
+parameters from the standard recorded 24-hour history at each origin.
+
+```bash
+python -m basal_optimization.historical_replay_diagnostic
+```
+
+The shorter outputs are aligned predictions from independent retrospective
+windows, not a continuous counterfactual treatment trajectory. Results remain
+development-only, use recorded basal, bolus, and `consumed_carbs_g`, and cannot
+authorize selection or validate a sustained 48-hour basal intervention.
