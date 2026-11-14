@@ -496,6 +496,13 @@ def _markdown_report(payload: dict[str, Any]) -> str:
     def number(value: float | None) -> str:
         return "unavailable" if value is None else f"{value:.3f}"
 
+    windows = list(payload.get("windows", ()))
+    failures = list(payload.get("failures", ()))
+    aggregate = payload.get("aggregate", {})
+    selection = payload.get("selection", {})
+    exclusions = list(selection.get("exclusion_reasons", ()))
+    complete_count = int(aggregate.get("complete_coverage_count", 0) or 0)
+    numerical_failures = int(aggregate.get("numerical_failure_count", 0) or 0)
     lines = [
         "# Baseline GRU–Hovorka 48-hour diagnostic",
         "",
@@ -512,26 +519,50 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         "",
         "## Pilot coverage",
         "",
-        f"- Completed windows: {payload['aggregate']['window_count']}",
-        f"- Complete CGM coverage: {payload['aggregate']['complete_coverage_count']}",
-        f"- Numerical failures: {payload['aggregate']['numerical_failure_count']}",
-        f"- Preparation/execution failures: {len(payload['failures'])}",
+        f"- Selected references: {selection.get('selected_reference_count', 'unavailable')}",
+        f"- Window records produced: {len(windows)}",
+        f"- Complete paired numerical/CGM assessments: {complete_count}",
+        f"- Numerical failures among window records: {numerical_failures}",
+        f"- Selection exclusions: {len(exclusions)}",
+        f"- Preparation/execution failures: {len(failures)}",
         "",
-        "## Per-window full replay",
-        "",
-        "| Patient | T | MAE | RMSE | Bias | Max abs | Endpoint |",
-        "|---|---|---:|---:|---:|---:|---:|",
     ]
-    for item in payload["windows"]:
-        metric = item["error_development"]["cumulative"][-1]
-        lines.append(
-            f"| {item['identity']['dataset']}/{item['identity']['patient_id']} | "
-            f"{item['decision_timestamp']} | {number(metric['mae_mg_dl'])} | "
-            f"{number(metric['rmse_mg_dl'])} | "
-            f"{number(metric['mean_signed_error_mg_dl'])} | "
-            f"{number(metric['maximum_absolute_error_mg_dl'])} | "
-            f"{number(metric['endpoint_error_mg_dl'])} |"
-        )
+    if exclusions or failures:
+        lines.extend(["## Exclusions and failures", ""])
+        lines.extend(f"- Selection: {reason}" for reason in exclusions)
+        lines.extend(f"- Execution: {reason}" for reason in failures)
+        lines.append("")
+    if not windows:
+        lines.extend([
+            "## Outcome",
+            "",
+            "No window completed preparation/execution, so trajectory metrics and input-audit findings are unavailable.",
+            "",
+        ])
+    else:
+        lines.extend([
+            "## Per-window full replay",
+            "",
+            "| Patient | T | Status | Matched | MAE | RMSE | Bias | Max abs | Endpoint |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        ])
+        for item in windows:
+            cumulative = item.get("error_development", {}).get("cumulative", ())
+            metric = cumulative[-1] if cumulative else {}
+            coverage = item.get("assessment", {}).get("coverage", {})
+            lines.append(
+                f"| {item.get('identity', {}).get('dataset', 'unavailable')}/"
+                f"{item.get('identity', {}).get('patient_id', 'unavailable')} | "
+                f"{item.get('decision_timestamp', 'unavailable')} | "
+                f"{metric.get('status', 'unavailable')} | "
+                f"{coverage.get('matched_observation_count', 'unavailable')}/"
+                f"{coverage.get('expected_observation_count', 'unavailable')} | "
+                f"{number(metric.get('mae_mg_dl'))} | "
+                f"{number(metric.get('rmse_mg_dl'))} | "
+                f"{number(metric.get('mean_signed_error_mg_dl'))} | "
+                f"{number(metric.get('maximum_absolute_error_mg_dl'))} | "
+                f"{number(metric.get('endpoint_error_mg_dl'))} |"
+            )
     lines.extend([
         "",
         "## Patient-equal cumulative error",
@@ -540,16 +571,19 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         "|---:|---:|---:|---:|---:|",
     ])
     for steps in PREFIX_STEPS:
-        metrics = payload["aggregate"]["equally_weighted_patient_prefix_metrics"][str(steps)]
+        metrics = aggregate.get("equally_weighted_patient_prefix_metrics", {}).get(
+            str(steps), {}
+        )
         lines.append(
-            f"| {steps * 5 // 60} h | {number(metrics['mae_mg_dl']['mean'])} | "
-            f"{number(metrics['rmse_mg_dl']['mean'])} | "
-            f"{number(metrics['mean_signed_error_mg_dl']['mean'])} | "
-            f"{number(metrics['maximum_absolute_error_mg_dl']['mean'])} |"
+            f"| {steps * 5 // 60} h | "
+            f"{number(metrics.get('mae_mg_dl', {}).get('mean'))} | "
+            f"{number(metrics.get('rmse_mg_dl', {}).get('mean'))} | "
+            f"{number(metrics.get('mean_signed_error_mg_dl', {}).get('mean'))} | "
+            f"{number(metrics.get('maximum_absolute_error_mg_dl', {}).get('mean'))} |"
         )
     known = next(
-        (item for item in payload["windows"]
-         if item["identity"] == asdict(KNOWN_EXAMPLE.identity)),
+        (item for item in windows
+         if item.get("identity") == asdict(KNOWN_EXAMPLE.identity)),
         None,
     )
     if known is not None:
@@ -577,53 +611,141 @@ def _markdown_report(payload: dict[str, Any]) -> str:
             )
             + ".",
         ])
-    maximum_basal_difference = max(
-        item["audit"]["basal"]["maximum_absolute_rate_difference_after_float32_u_per_hour"]
-        for item in payload["windows"]
-    )
-    maximum_initialization_difference = max(
-        abs(
-            item["audit"]["initialization"]["initialized_state_glucose_mg_dl"]
-            - item["audit"]["initialization"]["recorded_boundary_glucose_mg_dl"]
+    audits = [item.get("audit") for item in windows if item.get("audit")]
+    lines.extend(["", "## Data-derived audit findings", ""])
+    if not audits:
+        lines.append("- Input, initialization, event, measurement-age, and weight findings are unavailable.")
+    else:
+        basal_differences = [
+            audit["basal"]["maximum_absolute_rate_difference_after_float32_u_per_hour"]
+            for audit in audits
+            if audit.get("basal", {}).get(
+                "maximum_absolute_rate_difference_after_float32_u_per_hour"
+            ) is not None
+        ]
+        source_basal = [
+            audit["basal"].get("source_column_comparison") for audit in audits
+            if audit.get("basal", {}).get("source_column_comparison") is not None
+        ]
+        lines.append(
+            "- Basal materialization maximum absolute difference: "
+            + (f"{max(basal_differences):.3g} U/hour across {len(basal_differences)} windows."
+               if basal_differences else "unavailable.")
         )
-        for item in payload["windows"]
+        if source_basal:
+            source_differences = [
+                item.get("maximum_absolute_difference_from_rate_times_interval")
+                for item in source_basal
+                if item.get("maximum_absolute_difference_from_rate_times_interval") is not None
+            ]
+            lines.append(
+                "- `basal_u` versus rate × interval maximum measured difference: "
+                + (f"{max(source_differences):.3g} across {len(source_differences)} windows; units remain undocumented."
+                   if source_differences else "unavailable.")
+            )
+        lines.extend(["- Carbohydrate findings by window:", ""])
+        lines.extend([
+            "  | Patient | Announced total | Consumed total | Announcement intervals | Consumption intervals |",
+            "  |---|---:|---:|---:|---:|",
+        ])
+        for item in windows:
+            carbs = item.get("audit", {}).get("carbohydrates")
+            if carbs is None:
+                continue
+            identity = item.get("identity", {})
+            lines.append(
+                f"  | {identity.get('dataset', 'unavailable')}/{identity.get('patient_id', 'unavailable')} | "
+                f"{number(carbs.get('announced_total_g'))} g | "
+                f"{number(carbs.get('consumed_total_g'))} g | "
+                f"{carbs.get('announcement_event_count', 'unavailable')} | "
+                f"{carbs.get('consumption_event_count', 'unavailable')} |"
+            )
+        ages = [
+            audit.get("timestamps_and_cgm", {}).get("measurement_age", {})
+            for audit in audits
+        ]
+        age_values = [age for age in ages if age.get("count", 0)]
+        lines.append(
+            "- CGM measurement age: "
+            + (
+                f"observed minimum {min(age['minimum'] for age in age_values):.3f}, "
+                f"maximum {max(age['maximum'] for age in age_values):.3f}, and window medians "
+                f"{[age['median'] for age in age_values]} minutes."
+                if age_values else "unavailable."
+            )
+        )
+        event_comparisons = []
+        for audit in audits:
+            comparison = audit.get("timestamps_and_cgm", {}).get("event_error_comparison", {})
+            adjacent = comparison.get("within_30_minutes_after_event", {})
+            outside = comparison.get("outside_30_minutes_after_event", {})
+            event_comparisons.append((adjacent, outside))
+        available_events = [
+            (adjacent, outside) for adjacent, outside in event_comparisons
+            if adjacent.get("mean_absolute_error_mg_dl") is not None
+            and outside.get("mean_absolute_error_mg_dl") is not None
+        ]
+        lines.append(
+            f"- Event-error comparisons available for {len(available_events)} of {len(audits)} windows; "
+            f"unavailable for {len(audits) - len(available_events)}."
+        )
+        for index, (adjacent, outside) in enumerate(available_events, 1):
+            lines.append(
+                f"  - Comparison {index}: adjacent count={adjacent.get('count', 'unavailable')}, "
+                f"MAE={number(adjacent.get('mean_absolute_error_mg_dl'))}; "
+                f"outside count={outside.get('count', 'unavailable')}, "
+                f"MAE={number(outside.get('mean_absolute_error_mg_dl'))}."
+            )
+        weight_fields = sorted({
+            field for audit in audits
+            for field in audit.get("weight", {}).get("patient_specific_weight_columns", ())
+        })
+        trusted_weight_count = sum(
+            bool(audit.get("weight", {}).get("trusted_patient_specific_weight_available"))
+            for audit in audits
+        )
+        lines.append(
+            f"- Patient-weight fields observed: {weight_fields or 'none'}; trusted weight "
+            f"available in {trusted_weight_count} of {len(audits)} windows."
+        )
+        bolus_preserved = sum(
+            bool(audit.get("bolus", {}).get("event_intervals_exactly_preserved"))
+            for audit in audits
+        )
+        carbs_preserved = sum(
+            bool(audit.get("carbohydrates", {}).get("consumption_intervals_exactly_preserved"))
+            for audit in audits
+        )
+        lines.append(
+            f"- Exact interval preservation: bolus {bolus_preserved}/{len(audits)}, "
+            f"consumed carbohydrate {carbs_preserved}/{len(audits)}."
+        )
+    immutability = payload.get("source_immutability", {})
+    lines.append(
+        "- Source/model immutability: dataframe="
+        f"{immutability.get('dataframe_unchanged', 'unavailable')}, frozen model="
+        f"{immutability.get('frozen_model_state_unchanged', 'unavailable')}."
     )
-    events_higher = sum(
-        item["audit"]["timestamps_and_cgm"]["event_error_comparison"]
-        ["within_30_minutes_after_event"]["mean_absolute_error_mg_dl"]
-        > item["audit"]["timestamps_and_cgm"]["event_error_comparison"]
-        ["outside_30_minutes_after_event"]["mean_absolute_error_mg_dl"]
-        for item in payload["windows"]
-    )
+    prefix_metrics = aggregate.get("equally_weighted_patient_prefix_metrics", {})
+    first_mean = prefix_metrics.get(str(PREFIX_STEPS[0]), {}).get("mae_mg_dl", {}).get("mean")
+    last_mean = prefix_metrics.get(str(PREFIX_STEPS[-1]), {}).get("mae_mg_dl", {}).get("mean")
+    lines.extend(["", "## Measured horizon finding", ""])
+    if first_mean is None or last_mean is None:
+        lines.append("- Horizon change is unavailable because complete prefix metrics were not produced.")
+    else:
+        direction = "increased" if last_mean > first_mean else "decreased" if last_mean < first_mean else "was unchanged"
+        lines.append(
+            f"- Patient-equal mean MAE {direction} from {first_mean:.3f} mg/dL at two hours "
+            f"to {last_mean:.3f} mg/dL at 48 hours."
+        )
     lines.extend([
         "",
-        "## Input and initialization audit",
+        "## Hypotheses and limitations",
         "",
-        f"- All materialized bolus and consumed-carbohydrate event intervals exactly match source rows. Maximum baseline float32 replacement difference was {maximum_basal_difference:.3g} U/hour.",
-        "- `basal_u` exactly equals `basal_rate_u_per_hour × 5/60` in these windows, but its units remain undocumented and were not inferred from magnitude.",
-        "- Announced and consumed carbohydrate totals match per window, but consumption spans more intervals than announcements; announcements are not added again.",
-        f"- Initialized glucose matches the recorded S boundary within {maximum_initialization_difference:.3g} mg/dL across the pilot.",
-        "- CGM measurement ages are 0–2 minutes (median 1 minute) in every pilot window; all timestamp cadence and source-run continuity checks pass.",
-        f"- Event-adjacent MAE was higher than non-event-adjacent MAE in {events_higher} of {len(payload['windows'])} windows, so there is no consistent event clustering signal in this small sample.",
-        "- No trusted patient-specific weight column is present; all runs retain the checkpoint's fixed 70 kg contract.",
-        "- Source dataframe and frozen model state fingerprints are unchanged after execution.",
-        "",
-        "## Evidence and hypotheses",
-        "",
-        "1. **Strongest evidence: forecast-horizon extrapolation.** The trained objective covers 120 minutes and saved selection covers the first hour, while this replay runs 48 hours. The diagnostic does not establish 48-hour training support.",
-        "2. **Demonstrated contract difference: carbohydrate timing.** Native training feeds announced carbohydrates into physiological initialization and forecast; the current runtime feeds consumed carbohydrates. Pilot totals match, but consumption is distributed over many more intervals, so timing is materially different even without double counting.",
-        "3. **Strong evidence: observation-free drift.** Both implementations overwrite Q1 with observed CGM during historical initialization, but the training forecast is only 120 minutes; the 48-hour forecast has no correction, allowing state/parameter mismatch to accumulate much longer.",
-        "4. **Plausible: fixed patient parameters over a much longer rollout.** Fixed parameters match training-window behavior but are held 24 times longer than the declared training horizon.",
-        "5. **Plausible input uncertainty: aggregated event timing and CGM measurement age.** Events are applied at bucket start because within-bucket timing is unavailable. Event-adjacent error is descriptive, not causal.",
-        "6. **Unresolved: fixed 70 kg versus patient-specific weight.** No trusted patient-weight field exists in the mandated dataset, so this cannot be tested or claimed as the cause here.",
-        "",
-        "## Smallest discriminating next experiment",
-        "",
-        "Without changing weights or data, run a paired two-hour experiment at the same origins: (A) the native training physiological convention using announced carbohydrate for initialization and forecast, and (C) the current consumed-carbohydrate convention. Two hours matches the declared training horizon. A consistent A-over-C improvement would support the carbohydrate-contract hypothesis; similar results would shift weight toward parameter/initialization error and long-horizon drift, which the existing continuous prefixes already show after six hours. This must remain diagnostic and must not authorize selection.",
-        "",
-        "## Limitations",
-        "",
-        "This bounded development pilot is not independent validation, does not prove causation, and does not establish clinical safety or counterfactual accuracy.",
+        "- Code-contract fact: the checkpoint forecast horizon is two hours and selection scope is the first hour; a 48-hour replay is an extrapolation.",
+        "- Code-contract fact: native training physiology uses announced carbohydrate while the current runtime uses consumed carbohydrate.",
+        "- Hypothesis: long observation-free rollout and carbohydrate-timing convention may contribute to disagreement; this report does not establish causation.",
+        "- This bounded development pilot is not independent validation and does not establish clinical safety or counterfactual accuracy.",
     ])
     return "\n".join(lines) + "\n"
 

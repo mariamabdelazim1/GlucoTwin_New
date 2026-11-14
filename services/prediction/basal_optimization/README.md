@@ -214,3 +214,29 @@ no observation correction. That is a documented extrapolation beyond the
 training and checkpoint-selection horizons, not evidence of a simulator bug.
 Diagnostic results do not alter the uncalibrated reliability criteria and
 cannot authorize future selection.
+
+### Paired two-hour carbohydrate diagnostic
+
+`carbohydrate_pair_diagnostic.py` isolates the combined initialization and
+forecast carbohydrate-convention change over the checkpoint's declared
+two-hour horizon:
+
+```bash
+python -m basal_optimization.carbohydrate_pair_diagnostic \
+  --max-windows-per-patient 3
+```
+
+It uses only the five explicitly named development patients, selects meal
+origins chronologically without consulting outcome accuracy, estimates one
+shared GRU parameter vector per origin, and runs two arms through the unchanged
+physiological simulator. Arm A uses announced `carbs_g`; Arm C uses
+`consumed_carbs_g`. Basal, bolus, targets, timestamps, solver, weight, GRU
+input, and parameters are identical. The origin interval is excluded from
+initialization and applied once as forecast interval zero.
+
+Artifacts are written to the ignored
+`services/prediction/results/basal_carbohydrate_pair_diagnostic/` directory.
+Paired differences are Arm A minus Arm C; negative MAE or RMSE favors announced
+physiology for that retrospective window. This diagnostic uses recorded future
+events, combines initialization and forecast effects, and cannot authorize
+selection or establish 48-hour reliability.

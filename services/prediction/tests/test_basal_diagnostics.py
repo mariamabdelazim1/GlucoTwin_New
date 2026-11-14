@@ -18,6 +18,7 @@ from basal_optimization.development_reliability import select_development_window
 from basal_optimization.diagnostics import (
     PREFIX_STEPS,
     _dataframe_fingerprint,
+    _markdown_report,
     _model_state_unchanged,
     analyze_error_development,
     baseline_only_candidate_set,
@@ -73,7 +74,143 @@ def assessment(*, missing_index=None, numerical_failure=False):
     )
 
 
+def report_payload(*, windows=(), failures=(), exclusions=()):
+    empty_distribution = {
+        "count": 0, "minimum": None, "median": None, "mean": None, "maximum": None,
+    }
+    return {
+        "selection": {
+            "selected_reference_count": len(windows) + len(failures),
+            "exclusion_reasons": tuple(exclusions),
+        },
+        "windows": list(windows),
+        "failures": list(failures),
+        "source_immutability": {
+            "dataframe_unchanged": True,
+            "frozen_model_state_unchanged": True,
+        },
+        "aggregate": {
+            "window_count": len(windows),
+            "complete_coverage_count": sum(
+                item["error_development"]["cumulative"][-1]["status"] == "complete"
+                for item in windows
+            ),
+            "numerical_failure_count": sum(
+                item["assessment"]["baseline_simulation_status"] != "simulation_valid"
+                for item in windows
+            ),
+            "equally_weighted_patient_prefix_metrics": {
+                str(steps): {
+                    field: dict(empty_distribution)
+                    for field in (
+                        "mae_mg_dl", "rmse_mg_dl", "mean_signed_error_mg_dl",
+                        "maximum_absolute_error_mg_dl",
+                    )
+                }
+                for steps in PREFIX_STEPS
+            },
+        },
+    }
+
+
+def report_window(*, basal_difference=0.01, announced=10.0, consumed=8.0,
+                  event_adjacent=5.0, event_outside=4.0, status="complete"):
+    metric = {
+        "label": "0-48h", "status": status,
+        "mae_mg_dl": 2.0 if status == "complete" else None,
+        "rmse_mg_dl": 3.0 if status == "complete" else None,
+        "mean_signed_error_mg_dl": 1.0 if status == "complete" else None,
+        "maximum_absolute_error_mg_dl": 5.0 if status == "complete" else None,
+        "endpoint_error_mg_dl": 1.5 if status == "complete" else None,
+    }
+    return {
+        "identity": {"dataset": "synthetic", "patient_id": "p1"},
+        "decision_timestamp": pd.Timestamp("2027-01-04"),
+        "assessment": {
+            "baseline_simulation_status": (
+                "simulation_valid" if status != "numerical_failure" else "simulation_failed"
+            ),
+            "coverage": {"matched_observation_count": 576, "expected_observation_count": 576},
+        },
+        "error_development": {"cumulative": [metric], "four_hour_blocks": []},
+        "audit": {
+            "basal": {
+                "maximum_absolute_rate_difference_after_float32_u_per_hour": basal_difference,
+                "source_column_comparison": {
+                    "maximum_absolute_difference_from_rate_times_interval": basal_difference / 2,
+                },
+            },
+            "bolus": {"event_intervals_exactly_preserved": True},
+            "carbohydrates": {
+                "announced_total_g": announced, "consumed_total_g": consumed,
+                "announcement_event_count": 1, "consumption_event_count": 2,
+                "consumption_intervals_exactly_preserved": True,
+            },
+            "timestamps_and_cgm": {
+                "measurement_age": {
+                    "count": 576, "minimum": 0.0, "median": 1.0, "maximum": 2.0,
+                },
+                "event_error_comparison": {
+                    "within_30_minutes_after_event": {
+                        "count": 10,
+                        "mean_absolute_error_mg_dl": event_adjacent,
+                    },
+                    "outside_30_minutes_after_event": {
+                        "count": 566,
+                        "mean_absolute_error_mg_dl": event_outside,
+                    },
+                },
+            },
+            "weight": {
+                "patient_specific_weight_columns": [],
+                "trusted_patient_specific_weight_available": False,
+            },
+        },
+    }
+
+
 class BasalDiagnosticTests(unittest.TestCase):
+    def test_report_handles_empty_and_all_failed_pilots(self):
+        empty = _markdown_report(report_payload(exclusions=("no eligible windows",)))
+        self.assertIn("No window completed", empty)
+        self.assertIn("no eligible windows", empty)
+        failed = _markdown_report(report_payload(failures=("p1: preparation failed",)))
+        self.assertIn("No window completed", failed)
+        self.assertIn("preparation failed", failed)
+        self.assertNotIn("Completed windows: 1", failed)
+
+    def test_report_handles_partial_success_and_numerical_failure(self):
+        successful = report_window()
+        numerical = report_window(status="numerical_failure")
+        numerical["identity"]["patient_id"] = "p2"
+        text = _markdown_report(report_payload(
+            windows=(successful, numerical), failures=("p3: execution failed",)
+        ))
+        self.assertIn("Window records produced: 2", text)
+        self.assertIn("Numerical failures among window records: 1", text)
+        self.assertIn("execution failed", text)
+        self.assertIn("unavailable", text)
+
+    def test_report_handles_missing_event_metrics(self):
+        window = report_window()
+        comparison = window["audit"]["timestamps_and_cgm"]["event_error_comparison"]
+        comparison["within_30_minutes_after_event"]["mean_absolute_error_mg_dl"] = None
+        text = _markdown_report(report_payload(windows=(window,)))
+        self.assertIn("Event-error comparisons available for 0 of 1", text)
+
+    def test_report_findings_are_derived_from_payload(self):
+        first = _markdown_report(report_payload(windows=(report_window(
+            basal_difference=0.01, announced=10.0, consumed=8.0,
+        ),)))
+        second = _markdown_report(report_payload(windows=(report_window(
+            basal_difference=0.25, announced=30.0, consumed=12.0,
+        ),)))
+        self.assertIn("0.01 U/hour", first)
+        self.assertIn("0.25 U/hour", second)
+        self.assertIn("10.000 g", first)
+        self.assertIn("30.000 g", second)
+        self.assertNotEqual(first, second)
+
     def test_prefix_lengths_and_four_hour_partitions(self):
         result = analyze_error_development(assessment())
         self.assertEqual(
