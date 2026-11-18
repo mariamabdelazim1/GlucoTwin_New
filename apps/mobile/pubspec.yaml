@@ -49,3 +49,5 @@ flutter:
   assets:
     - assets/images/welcome-monitoring.webp
     - assets/images/breakfast-log.png
+    - assets/images/onboarding-digital-twin.png
+    - assets/images/auth-cgm-virtual-patient.png

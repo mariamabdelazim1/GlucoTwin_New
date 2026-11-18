@@ -7,6 +7,13 @@ const green = Color(0xFF047857);
 const darkGreen = Color(0xFF064E3B);
 const background = Color(0xFFF4F8F5);
 const muted = Color(0xFF667085);
+const authNavy = Color(0xFF072E50);
+const authNavyDeep = Color(0xFF061F39);
+const authBlue = Color(0xFF237BB6);
+const authBlueDark = Color(0xFF175F91);
+const authIce = Color(0xFFE1F0FA);
+const authIceText = Color(0xFFD3E7F4);
+const authBorder = Color(0xFFD7E8F3);
 
 double doctorRank(Map<String, dynamic> doctor) {
   final rating = doctor['rating'] as Map<String, dynamic>? ?? {};
@@ -223,7 +230,7 @@ class _PatientMobileAppState extends State<PatientMobileApp> {
       );
 }
 
-class PatientWelcome extends StatelessWidget {
+class PatientWelcome extends StatefulWidget {
   const PatientWelcome(
       {super.key,
       required this.onSignIn,
@@ -234,93 +241,298 @@ class PatientWelcome extends StatelessWidget {
   final String? error;
 
   @override
-  Widget build(BuildContext context) {
-    final heroHeight =
-        (MediaQuery.sizeOf(context).height * 0.69).clamp(420.0, 620.0);
-    return Scaffold(
-        body: SafeArea(
-            child: ListView(children: [
-      SizedBox(
-          height: heroHeight,
-          child: Stack(fit: StackFit.expand, children: [
-            Image.asset('assets/images/welcome-monitoring.webp',
-                fit: BoxFit.cover, alignment: Alignment.center),
-            Container(color: Colors.black.withValues(alpha: 0.29)),
-            const Positioned(
-                left: 22,
-                top: 22,
-                child: Row(children: [
-                  Icon(Icons.monitor_heart_outlined, color: Colors.white),
-                  SizedBox(width: 8),
-                  Text('Diabetes Digital Twin',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700))
-                ])),
-            Positioned(
-                left: 22,
-                right: 22,
-                bottom: 24,
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Your care,\nin your pocket.',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 35,
-                              height: 1.08,
-                              fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 9),
-                      const Text('Log your day. Stay close to your doctor.',
-                          style: TextStyle(color: Colors.white, fontSize: 15)),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                              onPressed: onSignIn,
-                              style: FilledButton.styleFrom(
-                                  backgroundColor: green,
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14)),
-                              child: const Text('Sign in'))),
-                      SizedBox(
-                          width: double.infinity,
-                          child: TextButton(
-                              onPressed: onCreateAccount,
-                              style: TextButton.styleFrom(
-                                  foregroundColor: Colors.white),
-                              child:
-                                  const Text('New patient? Create account'))),
-                    ])),
-          ])),
-      Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(children: [
-            ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.asset('assets/images/breakfast-log.png',
-                    width: 96, height: 96, fit: BoxFit.cover)),
-            const SizedBox(width: 16),
-            const Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text('A little more in sync',
-                      style: TextStyle(
-                          fontSize: 18,
-                          color: darkGreen,
-                          fontWeight: FontWeight.w700)),
-                  SizedBox(height: 5),
-                  Text('Readings, meals, messages, and your doctor together.',
-                      style: TextStyle(color: muted)),
-                ])),
-          ])),
-      if (error != null)
-        Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(error!, style: const TextStyle(color: Colors.red))),
-    ])));
+  State<PatientWelcome> createState() => _PatientWelcomeState();
+}
+
+class _PatientWelcomeState extends State<PatientWelcome> {
+  bool _started = false;
+  bool _visible = false;
+  bool _reduceMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion) {
+      _started = true;
+      _visible = true;
+    } else if (!_started) {
+      _started = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _visible = true);
+      });
+    }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final width = media.size.width;
+    final illustrationHeight = (width * 0.72).clamp(230.0, 380.0);
+    final transitionDuration =
+        _reduceMotion ? Duration.zero : const Duration(milliseconds: 520);
+    const features = [
+      (
+        icon: Icons.monitor_heart_outlined,
+        title: 'See the whole picture.',
+        description:
+            'Bring glucose readings, meals, and insulin records together.'
+      ),
+      (
+        icon: Icons.auto_graph_rounded,
+        title: 'Glucose predictions',
+        description:
+            'GlucoTwin predicts glucose levels for the next 30, 60, and 120 minutes using your digital twin.'
+      ),
+      (
+        icon: Icons.medication_outlined,
+        title: 'Bolus & basal optimization',
+        description:
+            'Explore personalized bolus doses and basal rates by simulating different insulin options with your digital twin.'
+      ),
+    ];
+
+    return Scaffold(
+      backgroundColor: authNavyDeep,
+      body: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(20, 18, 20, 24 + media.padding.bottom),
+          children: [
+            const Row(children: [
+              Icon(Icons.monitor_heart_outlined,
+                  color: Color(0xFF9DDFFF), size: 25),
+              SizedBox(width: 9),
+              Text('GlucoTwin',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.5)),
+            ]),
+            const SizedBox(height: 18),
+            AnimatedOpacity(
+              opacity: _visible ? 1 : 0,
+              duration: transitionDuration,
+              curve: Curves.easeOut,
+              child: AnimatedSlide(
+                offset: _visible ? Offset.zero : const Offset(0, 0.035),
+                duration: transitionDuration,
+                curve: Curves.easeOutCubic,
+                child: SizedBox(
+                  height: illustrationHeight,
+                  child: Image.asset(
+                    'assets/images/onboarding-digital-twin.png',
+                    fit: BoxFit.contain,
+                    semanticLabel:
+                        'A person connected to an anatomical digital twin and AI model',
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            AnimatedOpacity(
+              opacity: _visible ? 1 : 0,
+              duration: transitionDuration,
+              curve: Curves.easeOut,
+              child: AnimatedSlide(
+                offset: _visible ? Offset.zero : const Offset(0, 0.025),
+                duration: transitionDuration,
+                curve: Curves.easeOutCubic,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text.rich(
+                      const TextSpan(children: [
+                        TextSpan(text: 'Gluco'),
+                        TextSpan(
+                            text: 'Twin',
+                            style: TextStyle(color: Color(0xFF8ED7F7))),
+                      ]),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: (width * 0.135).clamp(44.0, 64.0),
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -2.5,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Meet the digital twin that brings your glucose, daily habits, and care team together—so every day feels a little easier to understand.',
+                      style: TextStyle(
+                          color: Color(0xFFBBD0E0), fontSize: 15, height: 1.65),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: widget.onSignIn,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF97D8F4),
+                          foregroundColor: const Color(0xFF082C49),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Sign in',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: widget.onCreateAccount,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Color(0x668FD8FF)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('New patient? Create account',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 42),
+            const Text('ONE PLACE. A FULLER PICTURE.',
+                style: TextStyle(
+                    color: Color(0xFF91C7E6),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.8)),
+            const SizedBox(height: 14),
+            ...features.map((feature) => Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: _OnboardingFeatureCard(
+                    icon: feature.icon,
+                    title: feature.title,
+                    description: feature.description,
+                  ),
+                )),
+            if (widget.error != null)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF3D2432),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF9B4C64))),
+                child: Text(widget.error!,
+                    style: const TextStyle(color: Color(0xFFFFD9E2))),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnboardingFeatureCard extends StatelessWidget {
+  const _OnboardingFeatureCard(
+      {required this.icon, required this.title, required this.description});
+
+  final IconData icon;
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [Color(0xFF153B59), Color(0xFF0C2A44)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0x2691C6E2)),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: const Color(0x1A8ED7F7),
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: const Color(0xFF9BD5F3), size: 23),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 7),
+                Text(description,
+                    style: const TextStyle(
+                        color: Color(0xFFAAC1D3), fontSize: 13, height: 1.55)),
+              ],
+            ),
+          ),
+        ]),
+      );
+}
+
+ThemeData _authScreenTheme(BuildContext context) {
+  final base = Theme.of(context);
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(10),
+    borderSide: const BorderSide(color: authBorder),
+  );
+  return base.copyWith(
+    scaffoldBackgroundColor: Colors.white,
+    colorScheme: base.colorScheme.copyWith(
+      primary: authBlue,
+      primaryContainer: authIce,
+      onPrimary: Colors.white,
+      surface: Colors.white,
+      outline: authBorder,
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white,
+      border: border,
+      enabledBorder: border,
+      focusedBorder: border.copyWith(
+          borderSide: const BorderSide(color: authBlue, width: 1.8)),
+      errorBorder: border.copyWith(
+          borderSide: const BorderSide(color: Color(0xFFB42318))),
+      focusedErrorBorder: border.copyWith(
+          borderSide: const BorderSide(color: Color(0xFFB42318), width: 1.8)),
+      labelStyle: const TextStyle(color: Color(0xFF526A7C)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: authBlue,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: authBlue.withValues(alpha: 0.45),
+        minimumSize: const Size.fromHeight(50),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(foregroundColor: authBlue),
+    ),
+    cardTheme: CardThemeData(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: authBorder),
+      ),
+    ),
+  );
 }
 
 class PatientSignIn extends StatefulWidget {
@@ -419,253 +631,406 @@ class _PatientSignInState extends State<PatientSignIn> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-          body: SafeArea(
-              child: Center(
-                  child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-                key: key,
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(
-                          alignment: Alignment.centerLeft,
-                          child: IconButton(
-                              tooltip: 'Back to welcome',
-                              onPressed: widget.onBack,
-                              icon: const Icon(Icons.arrow_back,
-                                  color: darkGreen))),
-                      const Icon(Icons.monitor_heart_outlined,
-                          color: green, size: 42),
-                      const SizedBox(height: 16),
-                      const Text('Diabetes Digital Twin',
-                          style: TextStyle(
-                              fontSize: 25,
-                              fontWeight: FontWeight.bold,
-                              color: darkGreen)),
-                      Text(
-                          creating
-                              ? 'Create your patient account'
-                              : 'Patient sign in',
-                          style: const TextStyle(color: muted)),
-                      if (!creating) ...[
-                        const SizedBox(height: 18),
-                        const Text('Saved account',
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final compactHeader = media.size.height < 700;
+
+    return Theme(
+      data: _authScreenTheme(context),
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  color: authNavy,
+                  padding:
+                      EdgeInsets.fromLTRB(12, 8, 20, compactHeader ? 22 : 28),
+                  child: Column(children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: IconButton(
+                        tooltip: 'Back to welcome',
+                        onPressed: widget.onBack,
+                        color: Colors.white,
+                        icon: const Icon(Icons.arrow_back),
+                      ),
+                    ),
+                    Image.asset(
+                      'assets/images/auth-cgm-virtual-patient.png',
+                      height: compactHeader ? 118 : 160,
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      semanticLabel:
+                          'CGM sensor data flowing into a virtual patient digital twin',
+                    ),
+                    const SizedBox(height: 12),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.monitor_heart_outlined,
+                            color: Color(0xFF9DDFFF), size: 23),
+                        SizedBox(width: 8),
+                        Text('Diabetes Digital Twin',
                             style: TextStyle(
-                                fontWeight: FontWeight.w600, color: darkGreen)),
-                        ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const CircleAvatar(
-                                backgroundColor: Color(0xFFEEF7F1),
-                                child:
-                                    Text('OH', style: TextStyle(color: green))),
-                            title: const Text('Omar Hassan'),
-                            subtitle: const Text('omar.hassan@example.com'),
-                            onTap: busy
-                                ? null
-                                : () {
-                                    email.text = 'omar.hassan@example.com';
-                                    password.text = 'password';
-                                    setState(() => error = null);
-                                  }),
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700)),
                       ],
-                      const SizedBox(height: 28),
-                      if (creating) ...[
-                        TextFormField(
-                            controller: name,
-                            decoration:
-                                const InputDecoration(labelText: 'Full name'),
-                            validator: (v) => v == null || v.trim().isEmpty
-                                ? 'Enter your name'
-                                : null),
-                        const SizedBox(height: 12),
-                        Row(children: [
-                          Expanded(
-                              child: TextFormField(
-                                  controller: age,
-                                  keyboardType: TextInputType.number,
+                    ),
+                  ]),
+                ),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 480),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                          24, 28, 24, 28 + media.padding.bottom),
+                      child: Form(
+                        key: key,
+                        child: FocusTraversalGroup(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                creating ? 'Join as a patient' : 'Welcome back',
+                                style: const TextStyle(
+                                  color: Color(0xFF172033),
+                                  fontSize: 27,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.6,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                creating
+                                    ? 'Complete your health information and choose a doctor.'
+                                    : 'Sign in to continue to your dashboard.',
+                                style: const TextStyle(
+                                    color: Color(0xFF667085), height: 1.45),
+                              ),
+                              if (!creating) ...[
+                                const SizedBox(height: 22),
+                                const Text('Saved account',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF172033))),
+                                const SizedBox(height: 8),
+                                Material(
+                                  color: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    side: const BorderSide(color: authBorder),
+                                  ),
+                                  child: ListTile(
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10)),
+                                    leading: const CircleAvatar(
+                                      backgroundColor: authIce,
+                                      child: Text('OH',
+                                          style: TextStyle(
+                                              color: authBlue,
+                                              fontWeight: FontWeight.w700)),
+                                    ),
+                                    title: const Text('Omar Hassan'),
+                                    subtitle:
+                                        const Text('omar.hassan@example.com'),
+                                    onTap: busy
+                                        ? null
+                                        : () {
+                                            email.text =
+                                                'omar.hassan@example.com';
+                                            password.text = 'password';
+                                            setState(() => error = null);
+                                          },
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              if (creating) ...[
+                                TextFormField(
+                                    controller: name,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                        labelText: 'Full name'),
+                                    validator: (v) =>
+                                        v == null || v.trim().isEmpty
+                                            ? 'Enter your name'
+                                            : null),
+                                const SizedBox(height: 12),
+                                LayoutBuilder(builder: (context, constraints) {
+                                  final stackFields =
+                                      constraints.maxWidth < 340 ||
+                                          media.textScaler.scale(1) > 1.25;
+                                  final ageField = TextFormField(
+                                      controller: age,
+                                      keyboardType: TextInputType.number,
+                                      textInputAction: TextInputAction.next,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Age'),
+                                      validator: (v) =>
+                                          (int.tryParse(v ?? '') ?? 0) < 1
+                                              ? 'Enter age'
+                                              : null);
+                                  final weightField = TextFormField(
+                                      controller: weight,
+                                      keyboardType: TextInputType.number,
+                                      textInputAction: TextInputAction.next,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Weight kg'),
+                                      validator: (v) =>
+                                          (double.tryParse(v ?? '') ?? 0) <= 0
+                                              ? 'Enter weight'
+                                              : null);
+                                  if (stackFields) {
+                                    return Column(children: [
+                                      ageField,
+                                      const SizedBox(height: 12),
+                                      weightField,
+                                    ]);
+                                  }
+                                  return Row(children: [
+                                    Expanded(child: ageField),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: weightField),
+                                  ]);
+                                }),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                    controller: height,
+                                    keyboardType: TextInputType.number,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                        labelText: 'Height cm'),
+                                    validator: (v) =>
+                                        (double.tryParse(v ?? '') ?? 0) <= 0
+                                            ? 'Enter height'
+                                            : null),
+                                const SizedBox(height: 28),
+                                const Text('Choose your doctor',
+                                    style: TextStyle(
+                                        color: Color(0xFF172033),
+                                        fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 8),
+                                ...doctors.asMap().entries.map((entry) {
+                                  final doctor =
+                                      entry.value as Map<String, dynamic>;
+                                  final profile = doctor['doctorProfile']
+                                          as Map<String, dynamic>? ??
+                                      {};
+                                  final rating = doctor['rating']
+                                          as Map<String, dynamic>? ??
+                                      {};
+                                  final selected = doctorId == doctor['id'];
+                                  return Card(
+                                      child: InkWell(
+                                          onTap: () => setState(() => doctorId =
+                                              doctor['id'] as String),
+                                          child: Padding(
+                                              padding: const EdgeInsets.all(12),
+                                              child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(children: [
+                                                      Icon(
+                                                          selected
+                                                              ? Icons
+                                                                  .radio_button_checked
+                                                              : Icons
+                                                                  .radio_button_off,
+                                                          color: authBlue),
+                                                      const SizedBox(width: 10),
+                                                      Expanded(
+                                                          child: Text(
+                                                              '#${entry.key + 1}  ${profile['fullName'] ?? 'Doctor'}',
+                                                              style: const TextStyle(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700)))
+                                                    ]),
+                                                    Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(
+                                                                left: 34,
+                                                                top: 4),
+                                                        child: Text(
+                                                            '${profile['specialty'] ?? ''} · ${profile['yearsExperience'] ?? '0'} years experience',
+                                                            style:
+                                                                const TextStyle(
+                                                                    color:
+                                                                        muted))),
+                                                    Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(
+                                                                left: 34,
+                                                                top: 4),
+                                                        child: Text(
+                                                            rating['average'] ==
+                                                                    null
+                                                                ? 'No ratings yet'
+                                                                : '${(rating['average'] as num).toStringAsFixed(1)} / 5 · ${rating['count']} ratings${rating['sample'] == true ? ' (sample)' : ''}',
+                                                            style: const TextStyle(
+                                                                color:
+                                                                    authBlueDark,
+                                                                fontSize: 13))),
+                                                    if (profile['medicalSchool'] !=
+                                                        null)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              '${profile['medicalSchool']}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      color:
+                                                                          muted,
+                                                                      fontSize:
+                                                                          13))),
+                                                    if ('${profile['qualifications'] ?? ''}'
+                                                        .isNotEmpty)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              'Qualifications: ${profile['qualifications']}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                    if (profile['certificates']
+                                                            is List &&
+                                                        (profile['certificates']
+                                                                as List)
+                                                            .isNotEmpty)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              'Certificates: ${(profile['certificates'] as List).join(', ')}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                    if (profile['papers']
+                                                            is List &&
+                                                        (profile['papers']
+                                                                as List)
+                                                            .isNotEmpty)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              'Papers: ${(profile['papers'] as List).join(', ')}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                    if (profile['bio'] != null)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(16,
+                                                                  0, 16, 12),
+                                                          child: Text(
+                                                              '${profile['bio']}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                  ]))));
+                                }),
+                              ],
+                              TextFormField(
+                                  controller: email,
+                                  keyboardType: TextInputType.emailAddress,
+                                  textInputAction: TextInputAction.next,
+                                  autofillHints: const [AutofillHints.email],
                                   decoration:
-                                      const InputDecoration(labelText: 'Age'),
+                                      const InputDecoration(labelText: 'Email'),
                                   validator: (v) =>
-                                      (int.tryParse(v ?? '') ?? 0) < 1
-                                          ? 'Enter age'
-                                          : null)),
-                          const SizedBox(width: 12),
-                          Expanded(
-                              child: TextFormField(
-                                  controller: weight,
-                                  keyboardType: TextInputType.number,
+                                      v == null || !v.contains('@')
+                                          ? 'Enter a valid email'
+                                          : null),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                  controller: password,
+                                  obscureText: true,
+                                  textInputAction: TextInputAction.done,
+                                  onFieldSubmitted:
+                                      busy ? null : (_) => _submit(),
+                                  autofillHints: [
+                                    creating
+                                        ? AutofillHints.newPassword
+                                        : AutofillHints.password
+                                  ],
                                   decoration: const InputDecoration(
-                                      labelText: 'Weight kg'),
+                                      labelText: 'Password'),
                                   validator: (v) =>
-                                      (double.tryParse(v ?? '') ?? 0) <= 0
-                                          ? 'Enter weight'
-                                          : null))
-                        ]),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                            controller: height,
-                            keyboardType: TextInputType.number,
-                            decoration:
-                                const InputDecoration(labelText: 'Height cm'),
-                            validator: (v) =>
-                                (double.tryParse(v ?? '') ?? 0) <= 0
-                                    ? 'Enter height'
-                                    : null),
-                        const SizedBox(height: 12),
-                        const SizedBox(height: 16),
-                        const Text('Choose your doctor',
-                            style: TextStyle(fontWeight: FontWeight.w700)),
-                        ...doctors.asMap().entries.map((entry) {
-                          final doctor = entry.value as Map<String, dynamic>;
-                          final profile = doctor['doctorProfile']
-                                  as Map<String, dynamic>? ??
-                              {};
-                          final rating =
-                              doctor['rating'] as Map<String, dynamic>? ?? {};
-                          final selected = doctorId == doctor['id'];
-                          return Card(
-                              child: InkWell(
-                                  onTap: () => setState(
-                                      () => doctorId = doctor['id'] as String),
-                                  child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(children: [
-                                              Icon(
-                                                  selected
-                                                      ? Icons
-                                                          .radio_button_checked
-                                                      : Icons.radio_button_off,
-                                                  color: green),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                  child: Text(
-                                                      '#${entry.key + 1}  ${profile['fullName'] ?? 'Doctor'}',
-                                                      style: const TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w700)))
-                                            ]),
-                                            Padding(
-                                                padding: const EdgeInsets.only(
-                                                    left: 34, top: 4),
-                                                child: Text(
-                                                    '${profile['specialty'] ?? ''} · ${profile['yearsExperience'] ?? '0'} years experience',
-                                                    style: const TextStyle(
-                                                        color: muted))),
-                                            Padding(
-                                                padding: const EdgeInsets.only(
-                                                    left: 34, top: 4),
-                                                child: Text(
-                                                    rating['average'] == null
-                                                        ? 'No ratings yet'
-                                                        : '${(rating['average'] as num).toStringAsFixed(1)} / 5 · ${rating['count']} ratings${rating['sample'] == true ? ' (sample)' : ''}',
-                                                    style: const TextStyle(
-                                                        color: darkGreen,
-                                                        fontSize: 13))),
-                                            if (profile['medicalSchool'] !=
-                                                null)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      '${profile['medicalSchool']}',
-                                                      style: const TextStyle(
-                                                          color: muted,
-                                                          fontSize: 13))),
-                                            if ('${profile['qualifications'] ?? ''}'
-                                                .isNotEmpty)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      'Qualifications: ${profile['qualifications']}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                            if (profile['certificates']
-                                                    is List &&
-                                                (profile['certificates']
-                                                        as List)
-                                                    .isNotEmpty)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      'Certificates: ${(profile['certificates'] as List).join(', ')}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                            if (profile['papers'] is List &&
-                                                (profile['papers'] as List)
-                                                    .isNotEmpty)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      'Papers: ${(profile['papers'] as List).join(', ')}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                            if (profile['bio'] != null)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 12),
-                                                  child: Text(
-                                                      '${profile['bio']}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                          ]))));
-                        }),
-                      ],
-                      TextFormField(
-                          controller: email,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(labelText: 'Email'),
-                          validator: (v) => v == null || !v.contains('@')
-                              ? 'Enter a valid email'
-                              : null),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                          controller: password,
-                          obscureText: true,
-                          decoration:
-                              const InputDecoration(labelText: 'Password'),
-                          validator: (v) =>
-                              v == null || v.length < (creating ? 8 : 1)
-                                  ? 'Enter your password'
-                                  : null),
-                      if (error != null)
-                        Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Text(error!,
-                                style: const TextStyle(color: Colors.red))),
-                      const SizedBox(height: 20),
-                      FilledButton(
-                          onPressed: busy ? null : _submit,
-                          child: Text(busy
-                              ? 'Please wait...'
-                              : creating
-                                  ? 'Create account'
-                                  : 'Sign in')),
-                      TextButton(
-                          onPressed: () => setState(() {
-                                creating = !creating;
-                                error = null;
-                              }),
-                          child: Text(creating
-                              ? 'Already have an account? Sign in'
-                              : 'New patient? Create account')),
-                    ]))),
-      ))));
+                                      v == null || v.length < (creating ? 8 : 1)
+                                          ? 'Enter your password'
+                                          : null),
+                              if (error != null)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 14),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF1F3),
+                                    borderRadius: BorderRadius.circular(9),
+                                    border: Border.all(
+                                        color: const Color(0xFFFECACA)),
+                                  ),
+                                  child: Text(error!,
+                                      style: const TextStyle(
+                                          color: Color(0xFFB42318))),
+                                ),
+                              const SizedBox(height: 20),
+                              FilledButton(
+                                  onPressed: busy ? null : _submit,
+                                  child: Text(busy
+                                      ? 'Please wait...'
+                                      : creating
+                                          ? 'Create account'
+                                          : 'Sign in')),
+                              const SizedBox(height: 4),
+                              TextButton(
+                                  onPressed: busy
+                                      ? null
+                                      : () => setState(() {
+                                            creating = !creating;
+                                            error = null;
+                                          }),
+                                  child: Text(creating
+                                      ? 'Already have an account? Sign in'
+                                      : 'New patient? Create account')),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class PatientPortal extends StatefulWidget {
