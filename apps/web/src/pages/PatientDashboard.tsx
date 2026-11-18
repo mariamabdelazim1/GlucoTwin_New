@@ -153,7 +153,7 @@ export function PatientDashboard({
   };
 
   return (
-    <>
+    <div className="patient-dashboard-content">
       <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and care-team messages in one place.' : 'Your manual readings, food, insulin, and care-team messages in one place.'} />
       {patient.slug === 'omar-hassan' ? <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo patient: sample CGM readings, forecasts, and historical logs. This is not a live sensor feed.</div> : null}
       {assignmentStatus !== 'accepted' ? <div className="surface mb-6 p-4 text-sm"><strong>Doctor request {assignmentStatus}</strong><p className="mt-1 text-clinical-muted">{doctorName} will appear here after accepting your request. You can still record food and insulin.</p></div> : null}
@@ -164,10 +164,10 @@ export function PatientDashboard({
       </section>
       {patient.usesCgm ? (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
-        <MetricCard label="Trend" value={patient.trend} sub="Latest CGM direction" />
-        <MetricCard label="Time in Range" value={`${patient.timeInRange}%`} sub="Today" />
-        <MetricCard label="Last CGM Reading" value={patient.lastReading} sub="Sample sensor data" />
+        <MetricCard blue label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
+        <MetricCard blue label="Trend" value={patient.trend} sub="Latest CGM direction" />
+        <MetricCard blue label="Time in Range" value={`${patient.timeInRange}%`} sub="Today" />
+        <MetricCard blue label="Last CGM Reading" value={patient.lastReading} sub="Sample sensor data" />
       </div>
       ) : <section className="surface p-5"><h2 className="font-semibold">No CGM connected yet</h2><p className="mt-1 text-sm text-clinical-muted">Glucose charts and forecasts will appear when CGM data is available.</p></section>}
 
@@ -211,7 +211,7 @@ export function PatientDashboard({
         </aside>
 
         <section className="space-y-6">
-          <section className="surface p-5">
+          <section className="surface min-w-0 overflow-hidden p-5">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Syringe size={20} /> Manual bolus log</h2>
             <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
               <select value={bolusForm.meal} onChange={(event) => setBolusForm({ ...bolusForm, meal: event.target.value })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm">
@@ -238,7 +238,7 @@ export function PatientDashboard({
               <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Insulin</dt><dd className="font-semibold">{patientProfile.insulinPlan}</dd></div>
             </dl>
           </section>
-          {patient.usesCgm ? <section className="surface p-5">
+          {patient.usesCgm ? <section className="surface min-w-0 overflow-hidden p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xl font-semibold"><TrendingUp size={20} /> Predicted Glucose</h2>
               <span className="text-sm font-semibold text-clinical-muted">Simulated digital twin</span>
@@ -259,11 +259,11 @@ export function PatientDashboard({
               <h2 className="flex items-center gap-2 text-xl font-semibold"><Activity size={20} /> CGM Graph</h2>
               <div className="text-sm"><GlucoseValue value={patient.currentGlucose} /> <span className="ml-2"><TrendIndicator trend={patient.trend} /></span></div>
             </div>
-            <CGMChart data={cgmReadings} />
+            <CGMChart blue data={cgmReadings} />
           </section> : null}
-          {patient.usesCgm ? <section className="surface p-5">
+          {patient.usesCgm ? <section className="surface min-w-0 overflow-hidden p-5">
             <h2 className="text-xl font-semibold">Digital Twin Forecast Graph</h2>
-            <DigitalTwinChart data={digitalTwinForecast} />
+            <DigitalTwinChart blue data={digitalTwinForecast} />
           </section> : null}
           <section className="surface p-5">
             <div className="flex items-center gap-2">
@@ -293,6 +293,6 @@ export function PatientDashboard({
           </section>
         </section>
       </div>
-    </>
+    </div>
   );
 }

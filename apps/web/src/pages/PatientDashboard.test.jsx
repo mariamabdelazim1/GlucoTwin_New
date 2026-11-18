@@ -10,7 +10,10 @@ const patientProfile = { fullName: 'Synthetic Patient', age: '30', weight: '', h
 
 function Harness() {
   const [bolus, setBolus] = useState([]);
-  return <MemoryRouter><PatientDashboard patient={patient} doctorName="Doctor" assignmentStatus="accepted" setMessages={() => {}} foodEntries={[]} setFoodEntries={() => {}} bolusEntries={bolus} setBolusEntries={setBolus} glucoseEntries={[]} setGlucoseEntries={() => {}} patientProfile={patientProfile} /></MemoryRouter>;
+  const [food, setFood] = useState([]);
+  const [glucose, setGlucose] = useState([]);
+  const [, setMessages] = useState([]);
+  return <MemoryRouter><PatientDashboard patient={patient} doctorName="Doctor" assignmentStatus="accepted" setMessages={setMessages} foodEntries={food} setFoodEntries={setFood} bolusEntries={bolus} setBolusEntries={setBolus} glucoseEntries={glucose} setGlucoseEntries={setGlucose} patientProfile={patientProfile} /></MemoryRouter>;
 }
 
 afterEach(cleanup);
@@ -31,4 +34,26 @@ test('insulin logging omits carbs, preserves zero, and shows invalid carbs', () 
   fireEvent.change(screen.getByPlaceholderText('Bolus units'), { target: { value: '1' } });
   fireEvent.click(screen.getByRole('button', { name: 'Log' }));
   expect(screen.getByRole('alert').textContent).toContain('finite, non-negative');
+});
+
+test('glucose, meal, messaging, and no-CGM states remain interactive', () => {
+  render(<Harness />);
+
+  expect(screen.getByText('No CGM connected yet')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Glucose reading in mg/dL'), { target: { value: '123' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record' }));
+  expect(screen.getByText('123 mg/dL')).toBeTruthy();
+
+  fireEvent.change(screen.getByPlaceholderText('Food items'), { target: { value: 'Oats and berries' } });
+  fireEvent.change(screen.getByPlaceholderText('Carbs g'), { target: { value: '42' } });
+  fireEvent.change(screen.getByDisplayValue('Plan for later'), { target: { value: 'eaten' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add food' }));
+  expect(screen.getByText('Oats and berries')).toBeTruthy();
+  expect(screen.getByText('42g carbs')).toBeTruthy();
+  expect(screen.getByText('eaten')).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText('Message or question'), { target: { value: 'Can you review lunch?' } });
+  fireEvent.keyDown(screen.getByLabelText('Message or question'), { key: 'Enter' });
+  expect(screen.getByText('Your message was recorded for Doctor.')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Open full messages' }).getAttribute('href')).toBe('/messages');
 });

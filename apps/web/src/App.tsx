@@ -79,9 +79,10 @@ function Shell({ session, account, accounts, assignments, assignmentActions, onA
   const currentAssignment = assignments.find((item) => item.patientId === account?.id && item.doctorId === account?.patientProfile?.selectedDoctorId);
   const selectedDoctor = accounts.find((item) => item.id === account?.patientProfile?.selectedDoctorId);
   const doctorName = selectedDoctor?.doctorProfile?.fullName || 'your doctor';
+  const patientDashboardTheme = role === 'patient' && (location.pathname === '/patient/dashboard' || location.pathname === '/patient/food');
 
-  return <div className="min-h-screen bg-clinical-bg text-clinical-text lg:flex">
-    <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
+  return <div className={`min-h-screen bg-clinical-bg text-clinical-text lg:flex ${patientDashboardTheme ? 'patient-dashboard-shell' : ''}`}>
+    <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} dashboardTheme={patientDashboardTheme} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
     <div className="min-w-0 flex-1">
       <TopHeader title={title} role={role} account={account} />
       <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6">{syncError && role !== 'admin' ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{syncError}</div> : null}{directoryError ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{directoryError}</div> : null}<Routes>

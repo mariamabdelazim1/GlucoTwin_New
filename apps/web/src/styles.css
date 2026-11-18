@@ -39,3 +39,92 @@ textarea {
 .table-scroll {
   scrollbar-width: thin;
 }
+
+.patient-dashboard-shell {
+  background: #f1f6fb;
+  color: #0b3555;
+}
+
+.patient-dashboard-shell > .min-w-0 > header {
+  border-color: #d6e5f0;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.patient-dashboard-shell .patient-dashboard-content .surface {
+  border-color: #d6e5f0;
+  border-radius: 0.875rem;
+  box-shadow: 0 8px 24px rgba(11, 53, 85, 0.06);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.patient-dashboard-shell .patient-dashboard-content .surface:hover {
+  border-color: #b9d7e9;
+  box-shadow: 0 12px 30px rgba(11, 53, 85, 0.09);
+}
+
+.patient-dashboard-shell .border-clinical-border {
+  border-color: #d6e5f0;
+}
+
+.patient-dashboard-shell .bg-clinical-bg {
+  background-color: #f1f6fb;
+}
+
+.patient-dashboard-shell .bg-clinical-secondary {
+  background-color: #e1f0fa;
+}
+
+.patient-dashboard-shell .bg-clinical-primary {
+  background-color: #237bb6;
+}
+
+.patient-dashboard-shell .text-clinical-primary,
+.patient-dashboard-shell .text-clinical-primaryDark {
+  color: #176391;
+}
+
+.patient-dashboard-shell .text-clinical-text {
+  color: #0b3555;
+}
+
+.patient-dashboard-shell .text-clinical-muted {
+  color: #61788a;
+}
+
+.patient-dashboard-shell input,
+.patient-dashboard-shell select,
+.patient-dashboard-shell textarea {
+  min-width: 0;
+  border-color: #cbdde9;
+  background: #fff;
+  color: #0b3555;
+}
+
+.patient-dashboard-shell .focus-ring:focus-visible {
+  outline-color: #237bb6;
+}
+
+.patient-dashboard-shell button,
+.patient-dashboard-shell a {
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.patient-dashboard-shell button:not(:disabled):active,
+.patient-dashboard-shell a:active {
+  transform: translateY(1px);
+}
+
+.patient-dashboard-shell .hover\:bg-clinical-primaryDark:hover {
+  background-color: #176391;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patient-dashboard-shell *,
+  .patient-dashboard-shell *::before,
+  .patient-dashboard-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
