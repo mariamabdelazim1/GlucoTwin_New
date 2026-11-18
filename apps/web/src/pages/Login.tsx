@@ -2,9 +2,10 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Activity, HeartPulse, Stethoscope } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
-import heroImage from '../assets/clinical-hero.png';
+import authIllustration from '../assets/auth/cgm-virtual-patient.png';
 import { DoctorDirectory } from '../components/doctors/DoctorDirectory';
 import type { Account, DoctorRating, PatientProfile, PatientRegistrationRequest } from '../types';
+import './Login.css';
 
 const emptyPatient: PatientProfile = {
   fullName: '', age: '', weight: '', height: '', diabetesType: '', insulinPlan: '',
@@ -56,11 +57,10 @@ export function Login({ mode = 'doctor', accounts, ratings, onSignIn, onRegister
   const switchRole = (next: 'doctor' | 'patient') => { setRole(next); if (next === 'doctor') setAction('signin'); setError(''); };
   const switchAction = (next: 'signin' | 'register') => { setAction(next); setError(''); };
 
-  return <main className="grid min-h-screen bg-clinical-bg lg:grid-cols-[minmax(360px,1fr)_minmax(460px,680px)]">
-    <section className="relative flex min-h-[280px] items-end overflow-hidden px-6 py-10 text-white md:px-12 lg:sticky lg:top-0 lg:h-screen">
-      <img src={heroImage} alt="Clinical workstation showing glucose dashboards" className="absolute inset-0 h-full w-full object-cover" />
-      <div className="absolute inset-0 bg-emerald-950/75" />
-      <div className="relative max-w-lg"><Link to="/" className="mb-8 inline-flex items-center gap-3 text-xl font-bold"><Activity size={25} /> Diabetes Digital Twin</Link><h1 className="text-3xl font-bold md:text-5xl">Care starts with the right connection.</h1><p className="mt-4 max-w-md text-emerald-50">A shared place for patients and doctors to follow progress and stay in touch.</p></div>
+  return <main className="gt-auth grid min-h-screen bg-white lg:grid-cols-[minmax(360px,1fr)_minmax(460px,680px)]">
+    <section className="gt-auth-visual relative flex min-h-[280px] overflow-hidden px-6 py-10 text-white md:px-12 lg:sticky lg:top-0 lg:h-screen">
+      <img src={authIllustration} alt="CGM sensor data flowing into a virtual patient digital twin" className="gt-auth-illustration" />
+      <div className="gt-auth-visual-copy relative max-w-lg"><Link to="/" className="gt-auth-brand mb-8 inline-flex items-center gap-3 text-xl font-bold"><Activity size={25} /> Diabetes Digital Twin</Link><h1 className="text-3xl font-bold md:text-5xl">Care starts with the right connection.</h1><p className="mt-4 max-w-md">A shared place for patients and doctors to follow progress and stay in touch.</p></div>
     </section>
     <section className="flex justify-center bg-white px-5 py-8 md:px-10 md:py-12"><div className="w-full max-w-xl">
       <div className="flex gap-1 border-b border-clinical-border" role="tablist" aria-label="Account type">
