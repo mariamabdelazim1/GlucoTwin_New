@@ -152,6 +152,8 @@ export interface BolusEntry {
   meal: string;
   carbs: string;
   carbsG?: number | null;
+  /** Optional contextual link. Carbohydrate totals remain sourced from the meal record. */
+  mealId?: string | null;
   /** Historical compatibility context. New insulin logs do not collect this. */
   preMeal?: string;
   recommended: string;

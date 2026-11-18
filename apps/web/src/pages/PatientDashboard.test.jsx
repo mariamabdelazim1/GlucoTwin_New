@@ -6,14 +6,16 @@ import { afterEach, expect, test } from 'vitest';
 import { PatientDashboard } from './PatientDashboard';
 
 const patient = { id: 'p1', slug: 'p1', name: 'Synthetic Patient', avatar: 'SP', age: 30, diabetesType: 'Type 1 Diabetes', usesCgm: false, currentGlucose: 0, trend: 'Stable', timeInRange: 0, averageGlucose: 0, lastReading: '', status: 'Needs Review', doctor: '', cgmStatus: 'Offline', lastActive: 'Now' };
-const patientProfile = { fullName: 'Synthetic Patient', age: '30', weight: '', height: '', diabetesType: 'Type 1 Diabetes', insulinPlan: '', diagnosisYear: '', medications: '', allergies: '', emergencyContact: '', selectedDoctorId: 'd1' };
+const meals = [
+  { id: 'planned-meal', patientSlug: 'p1', patient: 'Synthetic Patient', time: '12:00', meal: 'Lunch', items: 'Soup', carbs: '30g', announcedCarbsG: 30, consumedCarbsG: null, impact: 'Pending', status: 'planned', plannedEatingAt: '2026-01-01T12:00:00Z', actualEatingAt: null, version: 1 },
+  { id: 'eaten-meal', patientSlug: 'p1', patient: 'Synthetic Patient', time: '18:00', meal: 'Dinner', items: 'Pasta', carbs: '45g', announcedCarbsG: 45, consumedCarbsG: 40, impact: 'Recorded', status: 'eaten', plannedEatingAt: '2026-01-02T18:00:00Z', actualEatingAt: '2026-01-02T18:10:00Z', version: 2 },
+  { id: 'cancelled-meal', patientSlug: 'p1', patient: 'Synthetic Patient', time: '20:00', meal: 'Snack', items: 'Fruit', carbs: '12g', announcedCarbsG: 12, consumedCarbsG: null, impact: 'Cancelled', status: 'cancelled', plannedEatingAt: '2026-01-03T20:00:00Z', actualEatingAt: null, version: 2 },
+];
 
 function Harness() {
   const [bolus, setBolus] = useState([]);
-  const [food, setFood] = useState([]);
-  const [glucose, setGlucose] = useState([]);
-  const [, setMessages] = useState([]);
-  return <MemoryRouter><PatientDashboard patient={patient} doctorName="Doctor" assignmentStatus="accepted" setMessages={setMessages} foodEntries={food} setFoodEntries={setFood} bolusEntries={bolus} setBolusEntries={setBolus} glucoseEntries={glucose} setGlucoseEntries={setGlucose} patientProfile={patientProfile} /></MemoryRouter>;
+  const [food, setFood] = useState(meals);
+  return <MemoryRouter><PatientDashboard patient={patient} doctorName="Doctor" assignmentStatus="accepted" foodEntries={food} setFoodEntries={setFood} bolusEntries={bolus} setBolusEntries={setBolus} /></MemoryRouter>;
 }
 
 afterEach(cleanup);
@@ -36,13 +38,33 @@ test('insulin logging omits carbs, preserves zero, and shows invalid carbs', () 
   expect(screen.getByRole('alert').textContent).toContain('finite, non-negative');
 });
 
-test('glucose, meal, messaging, and no-CGM states remain interactive', () => {
+test('linked bolus uses read-only meal context without confirming a planned meal', () => {
+  render(<Harness />);
+  const selector = screen.getByLabelText('Related meal');
+  const options = [...selector.querySelectorAll('option')];
+  expect(options.map((option) => option.value)).toEqual(['', 'eaten-meal', 'planned-meal']);
+  expect(options[1].textContent).toContain('Dinner');
+  expect(options[1].textContent).toContain('45g');
+  expect(options[1].textContent).toContain('eaten');
+
+  fireEvent.change(selector, { target: { value: 'planned-meal' } });
+  expect(screen.getByText('Consumption has not been confirmed.')).toBeTruthy();
+  expect(screen.getByText('30g')).toBeTruthy();
+  expect(screen.queryByLabelText('Carbs (g, optional)')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Bolus units'), { target: { value: '2.5' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+  expect(screen.getByText('Related meal: Lunch · planned')).toBeTruthy();
+  expect(screen.getByText(/Planned 30g · Not yet consumed/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Mark eaten' })).toBeTruthy();
+});
+
+test('meal entry and no-CGM state remain while removed dashboard sections stay absent', () => {
   render(<Harness />);
 
   expect(screen.getByText('No CGM connected yet')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('Glucose reading in mg/dL'), { target: { value: '123' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Record' }));
-  expect(screen.getByText('123 mg/dL')).toBeTruthy();
+  expect(screen.queryByText('Manual glucose readings')).toBeNull();
+  expect(screen.queryByText('My medical info')).toBeNull();
+  expect(screen.queryByText('Care-team messages')).toBeNull();
 
   fireEvent.change(screen.getByPlaceholderText('Food items'), { target: { value: 'Oats and berries' } });
   fireEvent.change(screen.getByPlaceholderText('Carbs g'), { target: { value: '42' } });
@@ -50,10 +72,5 @@ test('glucose, meal, messaging, and no-CGM states remain interactive', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Add food' }));
   expect(screen.getByText('Oats and berries')).toBeTruthy();
   expect(screen.getByText('42g carbs')).toBeTruthy();
-  expect(screen.getByText('eaten')).toBeTruthy();
-
-  fireEvent.change(screen.getByLabelText('Message or question'), { target: { value: 'Can you review lunch?' } });
-  fireEvent.keyDown(screen.getByLabelText('Message or question'), { key: 'Enter' });
-  expect(screen.getByText('Your message was recorded for Doctor.')).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Open full messages' }).getAttribute('href')).toBe('/messages');
+  expect(screen.getAllByText('eaten').length).toBeGreaterThan(0);
 });

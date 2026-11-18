@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { Activity, Apple, Bot, Droplets, MessageSquare, Plus, Send, Syringe, TrendingUp } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Activity, Apple, Plus, Syringe, TrendingUp } from 'lucide-react';
 import { cgmReadings, digitalTwinForecast, forecastSnapshots } from '../data/cgm';
 import { CGMChart } from '../components/charts/CGMChart';
 import { DigitalTwinChart } from '../components/charts/DigitalTwinChart';
@@ -9,68 +8,66 @@ import { GlucoseValue } from '../components/clinical/GlucoseValue';
 import { TrendIndicator } from '../components/clinical/TrendIndicator';
 import { MetricCard } from '../components/ui/MetricCard';
 import { PageHeader } from '../components/ui/PageHeader';
-import type { BolusEntry, FoodEntry, Message, Patient, PatientProfile } from '../types';
-import type { GlucoseEntry } from '../utils/sync';
+import type { BolusEntry, FoodEntry, Patient } from '../types';
 import { updateMeal } from '../utils/sync';
+
+const mealCarbs = (entry: FoodEntry, field: 'announced' | 'consumed') => {
+  const canonical = field === 'announced' ? entry.announcedCarbsG : entry.consumedCarbsG;
+  if (canonical !== undefined && canonical !== null) return canonical;
+  if (field === 'consumed' && entry.status === 'planned') return null;
+  const parsed = Number.parseFloat(entry.carbs);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const mealStatus = (entry: FoodEntry) => entry.status === 'planned' ? 'planned' : 'eaten';
+
+const mealTimestamp = (entry: FoodEntry) => {
+  const instant = entry.actualEatingAt || entry.plannedEatingAt;
+  if (instant) return Date.parse(instant) || 0;
+  const match = entry.time.match(/^(\d{1,2}):(\d{2})/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
+};
+
+const mealDateTime = (entry: FoodEntry) => {
+  const instant = entry.actualEatingAt || entry.plannedEatingAt;
+  if (!instant) return entry.time;
+  const date = new Date(instant);
+  return Number.isNaN(date.getTime()) ? entry.time : date.toLocaleString([], {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+};
+
+const mealOptionLabel = (entry: FoodEntry) => {
+  const carbs = mealCarbs(entry, 'announced');
+  return `${entry.meal} · ${mealDateTime(entry)} · ${carbs === null ? 'carbs not provided' : `${carbs}g`} · ${mealStatus(entry)}`;
+};
 
 export function PatientDashboard({
   focusFood = false,
   patient,
   doctorName,
   assignmentStatus,
-  setMessages,
   foodEntries,
   setFoodEntries,
   bolusEntries,
   setBolusEntries,
-  glucoseEntries,
-  setGlucoseEntries,
-  patientProfile,
 }: {
   focusFood?: boolean;
   patient: Patient;
   doctorName: string;
   assignmentStatus: 'pending' | 'accepted' | 'declined';
-  setMessages: Dispatch<SetStateAction<Message[]>>;
   foodEntries: FoodEntry[];
   setFoodEntries: Dispatch<SetStateAction<FoodEntry[]>>;
   bolusEntries: BolusEntry[];
   setBolusEntries: Dispatch<SetStateAction<BolusEntry[]>>;
-  glucoseEntries: GlucoseEntry[];
-  setGlucoseEntries: Dispatch<SetStateAction<GlucoseEntry[]>>;
-  patientProfile: PatientProfile;
 }) {
   const patientFood = foodEntries.filter((entry) => entry.patientSlug === patient.slug);
   const patientBolus = bolusEntries.filter((entry) => entry.patientSlug === patient.slug);
-  const patientGlucose = glucoseEntries.filter((entry) => entry.patientSlug === patient.slug).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
-  const [draft, setDraft] = useState('');
-  const [botReply, setBotReply] = useState(`Ask a question here. Your message will also be sent to ${doctorName}.`);
+  const selectableMeals = patientFood.filter((entry) => entry.status !== 'cancelled').sort((a, b) => mealTimestamp(b) - mealTimestamp(a));
   const [mealForm, setMealForm] = useState({ meal: 'Lunch', items: '', carbs: '', glucose: '', status: 'planned' as 'planned' | 'eaten' });
-  const [bolusForm, setBolusForm] = useState({ meal: 'Lunch', carbs: '', recorded: '' });
+  const [bolusForm, setBolusForm] = useState({ meal: 'Lunch', mealId: '', carbs: '', recorded: '' });
   const [bolusError, setBolusError] = useState('');
-  const [glucoseValue, setGlucoseValue] = useState('');
-
-  const sendToDoctor = () => {
-    if (!draft.trim() || assignmentStatus !== 'accepted') return;
-    const text = draft.trim();
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        doctorId: patientProfile.selectedDoctorId,
-        patientSlug: patient.slug,
-        patient: patient.name,
-        avatar: patient.avatar,
-        from: 'patient',
-        text,
-        time: 'Now',
-        unread: true,
-        sentAt: new Date().toISOString(), syncState: 'pending', syncAttempts: 0,
-      },
-    ]);
-    setBotReply(`Your message was recorded for ${doctorName}.`);
-    setDraft('');
-  };
+  const selectedMeal = selectableMeals.find((entry) => entry.id === bolusForm.mealId);
 
   const currentTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -103,7 +100,7 @@ export function PatientDashboard({
   const addBolus = () => {
     const units = Number(bolusForm.recorded);
     const carbsText = bolusForm.carbs.trim();
-    const carbsG = carbsText === '' ? null : Number(carbsText);
+    const carbsG = selectedMeal || carbsText === '' ? null : Number(carbsText);
     if (!bolusForm.recorded.trim() || !Number.isFinite(units) || units < 0) {
       setBolusError('Enter a finite, non-negative insulin dose.');
       return;
@@ -118,7 +115,8 @@ export function PatientDashboard({
         patientSlug: patient.slug,
         patient: patient.name,
         time: currentTime(),
-        meal: bolusForm.meal,
+        meal: selectedMeal?.meal || bolusForm.meal,
+        mealId: selectedMeal?.id || null,
         carbs: carbsG === null ? 'Not provided' : `${carbsG}g`,
         carbsG,
         recommended: 'Doctor review',
@@ -129,7 +127,7 @@ export function PatientDashboard({
       },
       ...current,
     ]);
-    setBolusForm({ meal: 'Lunch', carbs: '', recorded: '' });
+    setBolusForm({ meal: 'Lunch', mealId: '', carbs: '', recorded: '' });
     setBolusError('');
   };
 
@@ -144,24 +142,11 @@ export function PatientDashboard({
     setFoodEntries((current) => current.map((item) => item.id === entry.id ? result.meal : item));
   };
 
-  const addGlucose = () => {
-    const value = Number(glucoseValue);
-    if (!Number.isFinite(value) || value < 20 || value > 600) return;
-    const now = new Date();
-    setGlucoseEntries((current) => [{ id: crypto.randomUUID(), patientSlug: patient.slug, value, time: currentTime(), recordedAt: now.toISOString(), syncState: 'pending', syncAttempts: 0 }, ...current]);
-    setGlucoseValue('');
-  };
-
   return (
     <div className="patient-dashboard-content">
-      <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and care-team messages in one place.' : 'Your manual readings, food, insulin, and care-team messages in one place.'} />
+      <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and insulin records in one place.' : 'Your food and insulin records in one place.'} />
       {patient.slug === 'omar-hassan' ? <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo patient: sample CGM readings, forecasts, and historical logs. This is not a live sensor feed.</div> : null}
       {assignmentStatus !== 'accepted' ? <div className="surface mb-6 p-4 text-sm"><strong>Doctor request {assignmentStatus}</strong><p className="mt-1 text-clinical-muted">{doctorName} will appear here after accepting your request. You can still record food and insulin.</p></div> : null}
-      <section className="surface mb-6 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-lg font-semibold"><Droplets size={20} /> Manual glucose readings</h2><span className="text-xs text-clinical-muted">Shared with your assigned doctor</span></div>
-        <div className="mt-4 flex flex-wrap gap-2"><input aria-label="Glucose reading in mg/dL" type="number" min="20" max="600" value={glucoseValue} onChange={(event) => setGlucoseValue(event.target.value)} placeholder="mg/dL" className="focus-ring w-40 rounded-md border border-clinical-border px-3 py-2" /><button onClick={addGlucose} className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white"><Plus size={16} /> Record</button></div>
-        {patientGlucose.length ? <div className="mt-4 flex flex-wrap gap-2">{patientGlucose.slice(0, 6).map((entry) => <div key={entry.id} className="rounded-md border border-clinical-border px-3 py-2 text-sm"><strong>{entry.value} mg/dL</strong><span className="ml-2 text-clinical-muted">{entry.time}</span></div>)}</div> : <p className="mt-3 text-sm text-clinical-muted">No manual readings yet.</p>}
-      </section>
       {patient.usesCgm ? (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard blue label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
@@ -213,30 +198,42 @@ export function PatientDashboard({
         <section className="space-y-6">
           <section className="surface min-w-0 overflow-hidden p-5">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Syringe size={20} /> Manual bolus log</h2>
-            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
-              <select value={bolusForm.meal} onChange={(event) => setBolusForm({ ...bolusForm, meal: event.target.value })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm">
-                <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
-              </select>
-              <input aria-label="Carbs (g, optional)" value={bolusForm.carbs} onChange={(event) => setBolusForm({ ...bolusForm, carbs: event.target.value })} inputMode="decimal" placeholder="Carbs (g, optional)" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
-              <input value={bolusForm.recorded} onChange={(event) => setBolusForm({ ...bolusForm, recorded: event.target.value })} inputMode="decimal" placeholder="Bolus units" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
-              <button onClick={addBolus} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2 text-sm font-semibold text-white hover:bg-clinical-primaryDark"><Plus size={16} /> Log</button>
+            <div className="mt-4 grid min-w-0 gap-3">
+              <label className="grid min-w-0 gap-1 text-sm font-semibold">
+                Related meal <span className="font-normal text-clinical-muted">Optional</span>
+                <select aria-label="Related meal" value={bolusForm.mealId} onChange={(event) => setBolusForm({ ...bolusForm, mealId: event.target.value, carbs: '' })} className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm font-normal">
+                  <option value="">No linked meal</option>
+                  {selectableMeals.map((entry) => <option key={entry.id} value={entry.id}>{mealOptionLabel(entry)}</option>)}
+                </select>
+              </label>
+              {selectedMeal ? <div role="status" className="rounded-lg border border-[#B9D7E9] bg-[#F1F8FC] p-3 text-sm">
+                <p className="font-semibold">{selectedMeal.meal} · {mealStatus(selectedMeal)}</p>
+                <p className="mt-1 text-clinical-muted">Planned carbohydrates: <strong className="text-clinical-text">{mealCarbs(selectedMeal, 'announced') ?? 'Not provided'}{mealCarbs(selectedMeal, 'announced') === null ? '' : 'g'}</strong></p>
+                <p className="mt-1 text-clinical-muted">{mealStatus(selectedMeal) === 'eaten' ? <>Confirmed consumed carbohydrates: <strong className="text-clinical-text">{mealCarbs(selectedMeal, 'consumed') ?? 'Not provided'}{mealCarbs(selectedMeal, 'consumed') === null ? '' : 'g'}</strong></> : 'Consumption has not been confirmed.'}</p>
+                <p className="mt-2 text-xs text-clinical-muted">Meal carbohydrates are read-only here and are counted only from the meal record.</p>
+              </div> : null}
+              <div className={`grid min-w-0 gap-3 ${selectedMeal ? 'sm:grid-cols-[1fr_auto]' : 'sm:grid-cols-[1fr_1fr_1fr_auto]'}`}>
+                {!selectedMeal ? <select aria-label="Dose meal type" value={bolusForm.meal} onChange={(event) => setBolusForm({ ...bolusForm, meal: event.target.value })} className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm">
+                  <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
+                </select> : null}
+                {!selectedMeal ? <input aria-label="Carbs (g, optional)" value={bolusForm.carbs} onChange={(event) => setBolusForm({ ...bolusForm, carbs: event.target.value })} inputMode="decimal" placeholder="Carbs (g, optional)" className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm" /> : null}
+                <input aria-label="Bolus units" value={bolusForm.recorded} onChange={(event) => setBolusForm({ ...bolusForm, recorded: event.target.value })} inputMode="decimal" placeholder="Bolus units" className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm" />
+                <button onClick={addBolus} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2 text-sm font-semibold text-white hover:bg-clinical-primaryDark"><Plus size={16} /> Log</button>
+              </div>
             </div>
             {bolusError ? <p role="alert" className="mt-2 text-sm text-red-700">{bolusError}</p> : null}
             <div className="mt-4 divide-y divide-clinical-border rounded-lg border border-clinical-border">
               {patientBolus.slice(0, 3).map((entry) => (
-                <div className="grid gap-2 p-3 text-sm md:grid-cols-4" key={entry.id}><strong>{entry.time}</strong><span>{entry.meal}</span><span>Carbs: {entry.carbs || 'Not provided'}</span><span>Recorded: {entry.recorded}</span></div>
+                <div className="grid min-w-0 gap-2 p-3 text-sm md:grid-cols-[auto_1fr_1.4fr_1fr]" key={entry.id}>
+                  <strong>{entry.time}</strong><span>{entry.meal}</span>
+                  {entry.mealId ? (() => {
+                    const linked = patientFood.find((meal) => meal.id === entry.mealId);
+                    return linked ? <span><span className="block font-semibold">Related meal: {linked.meal} · {mealStatus(linked)}</span><span className="block text-xs text-clinical-muted">Planned {mealCarbs(linked, 'announced') ?? 'unknown'}{mealCarbs(linked, 'announced') === null ? '' : 'g'}{mealStatus(linked) === 'eaten' ? ` · Confirmed ${mealCarbs(linked, 'consumed') ?? 'unknown'}${mealCarbs(linked, 'consumed') === null ? '' : 'g'}` : ' · Not yet consumed'}</span></span> : <span>Related meal unavailable</span>;
+                  })() : <span>Carbs: {entry.carbs || 'Not provided'}</span>}
+                  <span>Recorded: {entry.recorded}</span>
+                </div>
               ))}
             </div>
-          </section>
-          <section className="surface p-5">
-            <h2 className="text-xl font-semibold">My medical info</h2>
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Age</dt><dd className="font-semibold">{patientProfile.age}</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Weight</dt><dd className="font-semibold">{patientProfile.weight} kg</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Height</dt><dd className="font-semibold">{patientProfile.height} cm</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Type</dt><dd className="font-semibold">{patientProfile.diabetesType || 'Not provided'}</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Insulin</dt><dd className="font-semibold">{patientProfile.insulinPlan}</dd></div>
-            </dl>
           </section>
           {patient.usesCgm ? <section className="surface min-w-0 overflow-hidden p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -265,32 +262,6 @@ export function PatientDashboard({
             <h2 className="text-xl font-semibold">Digital Twin Forecast Graph</h2>
             <DigitalTwinChart blue data={digitalTwinForecast} />
           </section> : null}
-          <section className="surface p-5">
-            <div className="flex items-center gap-2">
-              <Bot className="text-clinical-primary" size={20} />
-              <h2 className="text-xl font-semibold">Care-team messages</h2>
-            </div>
-            <p className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm text-clinical-primaryDark">{assignmentStatus === 'accepted' ? botReply : 'Messaging opens after your doctor accepts your request.'}</p>
-            {assignmentStatus === 'accepted' ? <>
-            <label className="mt-4 block text-sm font-semibold" htmlFor="patient-chat">Message or question</label>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <input
-                id="patient-chat"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && sendToDoctor()}
-                placeholder="Example: My glucose is rising after lunch. What should I do?"
-                className="focus-ring min-w-0 flex-1 rounded-md border border-clinical-border px-3 py-2"
-              />
-              <button onClick={sendToDoctor} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white hover:bg-clinical-primaryDark">
-                <Send size={18} /> Send to doctor
-              </button>
-            </div>
-            <Link to="/messages" className="focus-ring mt-4 inline-flex items-center gap-2 rounded-md border border-clinical-border px-4 py-2 font-semibold text-clinical-primary hover:bg-clinical-secondary">
-              <MessageSquare size={18} /> Open full messages
-            </Link>
-            </> : null}
-          </section>
         </section>
       </div>
     </div>

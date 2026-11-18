@@ -56,7 +56,10 @@ for (const item of source.bolus || []) {
     carbs = Object.hasOwn(item, 'carbsG') ? optionalNumber(item.carbsG, 'carbohydrates')
       : Object.hasOwn(item, 'carbs') ? strictUnit(item.carbs, 'g', 'carbohydrates') : null;
   } catch (error) { issues.push(`bolus/${item.id || '?'}: ${error.message}`); }
-  parsed.bolus.push({ item, when: eventTime(item, 'administeredAt', 'bolus'), amount, carbs });
+  const mealId = item.mealId === undefined || item.mealId === null || item.mealId === '' ? null : item.mealId;
+  if (mealId !== null && typeof mealId !== 'string') issues.push(`bolus/${item.id || '?'}: related meal ID must be a string`);
+  if (mealId && carbs !== null) issues.push(`bolus/${item.id || '?'}: linked-meal carbohydrates must come from the meal record`);
+  parsed.bolus.push({ item, when: eventTime(item, 'administeredAt', 'bolus'), amount, carbs, mealId });
 }
 for (const item of source.messages || []) parsed.messages.push({ item, when: eventTime(item, 'sentAt', 'messages') });
 if (issues.length) {
@@ -118,9 +121,9 @@ if (issues.length) {
         (id,patient_id,meal_name,description,announced_carbs_g,planned_eating_at,status,actual_eating_at,consumed_carbs_g,decision_source,confirmation_provenance,legacy_payload)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'user_chosen',$10,$11)`, [item.id,item.patientSlug,item.meal,item.items,carbs,plannedAt,status,actualAt,consumed,
         JSON.stringify(status === 'eaten' ? { source: synthetic ? 'documented_synthetic_fixture' : item.confirmAnnouncedAmount === true ? 'imported_patient_confirmation' : 'imported_explicit_actual' } : { source: 'ambiguous_legacy_import_requires_review' }),JSON.stringify(withoutLocalSyncMetadata(item))]));
-      for (const { item, when, amount, carbs } of parsed.bolus) await insertLegacy('insulin_doses', item, () => db.query(`INSERT INTO insulin_doses
-        (id,patient_id,administered_units,carbs_g,administered_at,decision_source,confirmation_provenance,legacy_payload)
-        VALUES($1,$2,$3,$4,$5,'user_decided',$6,$7)`, [item.id,item.patientSlug,amount,carbs,when,JSON.stringify({ source: 'legacy_import' }),JSON.stringify(withoutLocalSyncMetadata(item))]));
+      for (const { item, when, amount, carbs, mealId } of parsed.bolus) await insertLegacy('insulin_doses', item, () => db.query(`INSERT INTO insulin_doses
+        (id,patient_id,administered_units,carbs_g,meal_id,administered_at,decision_source,confirmation_provenance,legacy_payload)
+        VALUES($1,$2,$3,$4,$5,$6,'user_decided',$7,$8)`, [item.id,item.patientSlug,amount,carbs,mealId,when,JSON.stringify({ source: 'legacy_import' }),JSON.stringify(withoutLocalSyncMetadata(item))]));
       for (const item of source.ratings) {
         const existing = (await db.query('SELECT doctor_id,patient_id,score,source FROM doctor_ratings WHERE id=$1', [item.id])).rows[0];
         const patientId = item.source==='patient'?item.patientId:null;

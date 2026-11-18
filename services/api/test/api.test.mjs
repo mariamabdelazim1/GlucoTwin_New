@@ -217,11 +217,45 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
     assertNoLocalSyncMetadata((await request('snapshot', { token: first })).body.glucose.find((item) => item.id === reading.id));
 
     const plannedMealId = `meal-planned-${runId}`;
+    const linkedPlannedMealId = `meal-linked-${runId}`;
+    const otherPatientMealId = `meal-other-${runId}`;
     const legacyPlannedMealId = `meal-legacy-${runId}`;
     const zeroMealId = `meal-zero-${runId}`;
     assert.equal((await request('food', { token: first, method: 'POST', data: {
       id: plannedMealId, patientSlug: firstId, announcedCarbsG: 30, status: 'planned', plannedEatingAt: new Date().toISOString(), ...localSyncMetadata,
     } })).status, 200);
+    assert.equal((await request('food', { token: first, method: 'POST', data: {
+      id: linkedPlannedMealId, patientSlug: firstId, meal: 'Lunch', announcedCarbsG: 55,
+      status: 'planned', plannedEatingAt: '2026-01-02T12:00:00Z',
+    } })).status, 200);
+    assert.equal((await request('food', { token: second, method: 'POST', data: {
+      id: otherPatientMealId, patientSlug: secondId, meal: 'Dinner', announcedCarbsG: 60,
+      status: 'planned', plannedEatingAt: '2026-01-02T18:00:00Z',
+    } })).status, 200);
+    const linkedBolusId = `bolus-linked-${runId}`;
+    const linkedBolus = await request('bolus', { token: first, method: 'POST', data: {
+      id: linkedBolusId, patientSlug: firstId, meal: 'Lunch', mealId: linkedPlannedMealId,
+      administeredUnits: 2.5, administeredAt: '2026-01-02T11:55:00Z',
+    } });
+    assert.equal(linkedBolus.status, 200, JSON.stringify(linkedBolus.body));
+    assert.deepEqual((await db.query('SELECT meal_id,carbs_g FROM insulin_doses WHERE id=$1', [linkedBolusId])).rows[0], {
+      meal_id: linkedPlannedMealId, carbs_g: null,
+    });
+    assert.deepEqual((await db.query('SELECT status,consumed_carbs_g,announced_carbs_g FROM meals WHERE id=$1', [linkedPlannedMealId])).rows[0], {
+      status: 'planned', consumed_carbs_g: null, announced_carbs_g: '55',
+    });
+    const linkedSnapshot = (await request('snapshot', { token: first })).body;
+    assert.equal(linkedSnapshot.bolus.find((item) => item.id === linkedBolusId).mealId, linkedPlannedMealId);
+    assert.equal(linkedSnapshot.bolus.find((item) => item.id === linkedBolusId).carbsG, null);
+    assert.equal(linkedSnapshot.food.find((item) => item.id === linkedPlannedMealId).announcedCarbsG, 55);
+    assert.equal((await request('bolus', { token: first, method: 'POST', data: {
+      id: `bolus-other-meal-${runId}`, patientSlug: firstId, mealId: otherPatientMealId,
+      administeredUnits: 1, administeredAt: '2026-01-02T17:55:00Z',
+    } })).status, 400);
+    assert.equal((await request('bolus', { token: first, method: 'POST', data: {
+      id: `bolus-duplicate-carbs-${runId}`, patientSlug: firstId, mealId: linkedPlannedMealId,
+      administeredUnits: 1, carbsG: 55, administeredAt: '2026-01-02T11:50:00Z',
+    } })).status, 400);
     assertNoLocalSyncMetadata((await db.query('SELECT legacy_payload FROM meals WHERE id=$1', [plannedMealId])).rows[0].legacy_payload);
     const legacyTime = '2026-01-02T10:00:00.000Z';
     assert.equal((await request('food', { token: first, method: 'POST', data: {

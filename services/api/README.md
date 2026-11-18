@@ -70,6 +70,7 @@ Medical events:
 
 - `glucose_readings` in mg/dL
 - `insulin_doses` in units with nullable `carbs_g`; these are actual administrations, never hypothetical scenarios
+- `insulin_doses.meal_id` is an optional contextual link to a same-patient meal. When it is set, `carbs_g` is null and carbohydrate totals come only from the linked `meals` row. Snapshots expose the link as `mealId`; consumers must never materialize the linked meal's carbohydrates as a second carbohydrate event. The API currently does not assemble prediction-model input from these tables, so any future adapter must preserve this single-source rule.
 - `basal_schedule_entries` in U/hour with prescribed-versus-confirmed kind and overlap prevention
 - `meals`, separating announced carbohydrates from nullable confirmed consumption
 
