@@ -118,6 +118,77 @@ textarea {
   background-color: #176391;
 }
 
+.patient-dashboard-content {
+  container: patient-page / inline-size;
+}
+
+.patient-log-region {
+  display: grid;
+  align-items: start;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.patient-log-items {
+  display: contents;
+}
+
+.patient-log-food,
+.patient-log-bolus {
+  container-type: inline-size;
+}
+
+.patient-log-food {
+  order: 1;
+}
+
+.patient-log-bolus {
+  order: 2;
+}
+
+.patient-log-recommendation {
+  order: 3;
+  min-width: 0;
+}
+
+.patient-log-monitoring {
+  order: 4;
+  min-width: 0;
+}
+
+@container patient-page (min-width: 52rem) {
+  .patient-log-region {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+  }
+
+  .patient-log-food {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .patient-log-bolus {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .patient-log-recommendation,
+  .patient-log-monitoring {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 24rem) {
+  .patient-food-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.42fr);
+  }
+}
+
+@container (min-width: 19rem) {
+  .patient-bolus-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .patient-dashboard-shell *,
   .patient-dashboard-shell *::before,
