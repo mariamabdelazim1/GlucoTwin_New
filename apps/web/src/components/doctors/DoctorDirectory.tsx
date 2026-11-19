@@ -6,7 +6,7 @@ import { Avatar } from '../ui/Avatar';
 
 type Sort = 'rank' | 'rating' | 'experience';
 
-export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, selectLabel = 'Choose this doctor', selectedLabel = 'Selected doctor', disabled = false }: {
+export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, selectLabel = 'Choose this doctor', selectedLabel = 'Selected doctor', disabled = false, portalTheme = false }: {
   doctors: Account[];
   ratings: DoctorRating[];
   selectedId?: string;
@@ -14,6 +14,7 @@ export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, select
   selectLabel?: string;
   selectedLabel?: string;
   disabled?: boolean;
+  portalTheme?: boolean;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -25,7 +26,7 @@ export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, select
     return difference || (a.doctorProfile?.fullName || '').localeCompare(b.doctorProfile?.fullName || '');
   });
 
-  return <div>
+  return <div className={portalTheme ? 'patient-doctor-directory' : undefined}>
     <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_180px]">
       <label className="relative"><span className="sr-only">Search doctors</span><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-clinical-muted" size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search doctors or specialty" className="focus-ring w-full rounded-md border border-clinical-border py-2 pl-9 pr-3 text-sm" /></label>
       <label><span className="sr-only">Sort doctors</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)} className="focus-ring w-full rounded-md border border-clinical-border bg-white px-3 py-2 text-sm"><option value="rank">Overall ranking</option><option value="rating">Highest rating</option><option value="experience">Most experience</option></select></label>
@@ -36,11 +37,11 @@ export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, select
         const profile = doctor.doctorProfile!;
         const expanded = openId === doctor.id;
         const summary = ratingSummary(doctor.id, ratings);
-        return <article key={doctor.id} className={`rounded-md border p-4 ${selectedId === doctor.id ? 'border-clinical-primary bg-emerald-50' : 'border-clinical-border bg-white'}`}>
+        return <article key={doctor.id} className={`doctor-directory-card rounded-lg border p-4 ${selectedId === doctor.id ? `border-clinical-primary ${portalTheme ? 'bg-clinical-secondary' : 'bg-emerald-50'}` : 'border-clinical-border bg-white'}`}>
           <div className="flex items-start gap-3">
             {profile.photo ? <img src={profile.photo} alt="" className="h-11 w-11 shrink-0 rounded-md object-cover" /> : <Avatar label={profile.fullName.split(' ').map((part) => part[0]).slice(-2).join('')} />}
             <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-bold text-clinical-primaryDark">#{index + 1}</span><h3 className="font-semibold">{profile.fullName}</h3></div><p className="text-sm text-clinical-muted">{profile.specialty}</p><div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"><span className="inline-flex items-center gap-1 font-semibold text-amber-700"><Star size={15} fill={summary.average === null ? 'none' : 'currentColor'} />{summary.average === null ? 'Not rated' : `${summary.average.toFixed(1)} / 5`}</span><span className="text-clinical-muted">{profile.yearsExperience || '0'} years experience</span>{summary.count ? <span className="text-clinical-muted">{summary.count} {summary.sample ? 'sample' : 'patient'} rating{summary.count === 1 ? '' : 's'}</span> : null}</div></div>
-            <button type="button" onClick={() => setOpenId(expanded ? null : doctor.id)} className="focus-ring shrink-0 text-sm font-semibold text-clinical-primary">{expanded ? 'Less' : 'Profile'}</button>
+            <button type="button" onClick={() => setOpenId(expanded ? null : doctor.id)} className="focus-ring shrink-0 rounded-sm text-sm font-semibold text-clinical-primary hover:text-clinical-primaryDark">{expanded ? 'Less' : 'Profile'}</button>
           </div>
           {expanded ? <div className="mt-4 space-y-3 border-t border-clinical-border pt-4 text-sm">
             {profile.bio ? <p>{profile.bio}</p> : null}
@@ -50,7 +51,7 @@ export function DoctorDirectory({ doctors, ratings, selectedId, onSelect, select
             <div className="flex gap-2"><BookOpen size={17} className="shrink-0 text-clinical-primary" /><span>{profile.papers.length ? profile.papers.join(', ') : 'No papers added'}</span></div>
             {(profile.documents ?? []).map((document) => <a key={document.id} href={document.dataUrl} target="_blank" rel="noreferrer" className="block font-semibold text-clinical-primary">{document.kind === 'certificate' ? 'Certificate' : 'Paper'}: {document.name}</a>)}
           </div> : null}
-          {onSelect ? <button type="button" disabled={disabled || selectedId === doctor.id && selectedLabel !== 'Retry request to this doctor'} onClick={() => onSelect(doctor.id)} className={`focus-ring mt-4 w-full rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50 ${selectedId === doctor.id ? 'bg-clinical-primary text-white' : 'border border-clinical-border text-clinical-primary'}`}>{selectedId === doctor.id ? selectedLabel : selectLabel}</button> : null}
+          {onSelect ? <button type="button" disabled={disabled || selectedId === doctor.id && selectedLabel !== 'Retry request to this doctor'} onClick={() => onSelect(doctor.id)} className={`focus-ring mt-4 w-full rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50 ${selectedId === doctor.id ? 'bg-clinical-primary text-white' : `border border-clinical-border text-clinical-primary ${portalTheme ? 'hover:bg-clinical-secondary' : ''}`}`}>{selectedId === doctor.id ? selectedLabel : selectLabel}</button> : null}
         </article>;
       })}
       {ordered.length === 0 ? <p className="rounded-md border border-clinical-border p-4 text-sm text-clinical-muted">No doctors match this search.</p> : null}

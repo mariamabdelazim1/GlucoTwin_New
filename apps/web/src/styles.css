@@ -78,6 +78,10 @@ textarea {
   background-color: #237bb6;
 }
 
+.patient-dashboard-shell .border-clinical-primary {
+  border-color: #237bb6;
+}
+
 .patient-dashboard-shell .text-clinical-primary,
 .patient-dashboard-shell .text-clinical-primaryDark {
   color: #176391;
@@ -116,6 +120,20 @@ textarea {
 
 .patient-dashboard-shell .hover\:bg-clinical-primaryDark:hover {
   background-color: #176391;
+}
+
+.patient-doctors-page .doctor-directory-card {
+  box-shadow: 0 5px 18px rgba(11, 53, 85, 0.045);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.patient-doctors-page .doctor-directory-card:hover {
+  border-color: #b9d7e9;
+  box-shadow: 0 9px 24px rgba(11, 53, 85, 0.08);
+}
+
+.patient-doctors-page .doctor-directory-card:focus-within {
+  border-color: #8ec4e3;
 }
 
 .patient-dashboard-content {
