@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'data/sync_api.dart';
+import 'presentation/widgets/bolus_recommendation_card.dart';
 
 const green = Color(0xFF237BB6);
 const darkGreen = Color(0xFF072E50);
@@ -1490,6 +1491,7 @@ class _PatientPortalState extends State<PatientPortal>
             _detail('Average glucose', '${summary['averageGlucose']} mg/dL'),
             _detail('Last CGM reading', '${summary['lastReading']}')
           ])),
+      const BolusRecommendationCard(),
       _panel('CGM graph', _sampleChart(cgm, forecast: false)),
       _panel(
           'Predicted glucose · demo',

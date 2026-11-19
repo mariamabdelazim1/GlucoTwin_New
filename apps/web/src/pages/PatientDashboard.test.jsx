@@ -104,9 +104,10 @@ test('no-CGM and previously removed dashboard sections remain unchanged', () => 
   expect(screen.queryByText('Care-team messages')).toBeNull();
 });
 
-test('bolus suggestion prototype switches demo states and reveals matching sample inputs', () => {
+test('bolus recommendation prototype switches demo states and reveals matching sample inputs', () => {
   render(<Harness />);
 
+  expect(screen.getByRole('heading', { name: 'Bolus Recommendation' })).toBeTruthy();
   expect(screen.getByText('Meal bolus estimate')).toBeTruthy();
   expect(screen.getByText('Lunch · 45 g carbs')).toBeTruthy();
   expect(screen.getByLabelText('Dose unavailable').textContent).toBe('— U');

@@ -38,14 +38,14 @@ export function BolusSuggestionCard({ initialState = 'meal' }: { initialState?: 
   const suggestion = suggestionStates[demoState];
 
   return (
-    <section className="surface min-w-0 overflow-hidden p-5" aria-labelledby="bolus-suggestion-title">
+    <section className="surface min-w-0 overflow-hidden p-5" aria-labelledby="bolus-recommendation-title">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-clinical-border pb-3">
-        <h2 id="bolus-suggestion-title" className="flex items-center gap-2 text-xl font-semibold">
-          <Calculator size={20} aria-hidden="true" /> Bolus suggestion
+        <h2 id="bolus-recommendation-title" className="flex items-center gap-2 text-xl font-semibold">
+          <Calculator size={20} aria-hidden="true" /> Bolus Recommendation
         </h2>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="text-xs font-semibold text-clinical-muted sm:text-sm">Simulation preview</span>
-          <div className="flex rounded-md border border-clinical-border bg-clinical-bg p-0.5" role="group" aria-label="Bolus suggestion demo state">
+          <div className="flex rounded-md border border-clinical-border bg-clinical-bg p-0.5" role="group" aria-label="Bolus recommendation demo state">
             {(Object.keys(suggestionStates) as BolusSuggestionDemoState[]).map((state) => (
               <button
                 key={state}

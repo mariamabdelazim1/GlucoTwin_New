@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:glucotwin/data/sync_api.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:glucotwin/presentation/widgets/bolus_recommendation_card.dart';
 
 void main() {
   test('mobile clinical payloads match the units-only and eaten-food contracts',
@@ -114,6 +115,40 @@ void main() {
     expect(find.text('Care-team messages'), findsNothing);
     expect(find.text('My medical info'), findsNothing);
     expect(find.text('Latest manual reading'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('bolus recommendation switches states and opens matching details',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(child: BolusRecommendationCard()),
+        ),
+      ),
+    );
+
+    expect(find.text('Bolus Recommendation'), findsOneWidget);
+    expect(find.text('Lunch · 45 g carbs'), findsOneWidget);
+    expect(find.text('Meal bolus estimate'), findsOneWidget);
+    expect(find.text('— U'), findsOneWidget);
+
+    await tester.tap(find.text('High glucose').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Glucose above your target'), findsOneWidget);
+    expect(find.text('214 mg/dL · Sample reading at 23:00'), findsOneWidget);
+    expect(find.text('Correction bolus estimate'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('bolus-recommendation-review')));
+    await tester.pumpAndSettle();
+    expect(find.text('High glucose inputs'), findsOneWidget);
+    expect(find.text('70–180 mg/dL'), findsOneWidget);
+    expect(find.text('Visual prototype only. No dose is calculated or saved.'),
+        findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
