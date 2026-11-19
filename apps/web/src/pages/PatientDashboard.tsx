@@ -4,6 +4,7 @@ import { Activity, Apple, Plus, Syringe, TrendingUp } from 'lucide-react';
 import { cgmReadings, digitalTwinForecast, forecastSnapshots } from '../data/cgm';
 import { CGMChart } from '../components/charts/CGMChart';
 import { DigitalTwinChart } from '../components/charts/DigitalTwinChart';
+import { BolusSuggestionCard } from '../components/clinical/BolusSuggestionCard';
 import { GlucoseValue } from '../components/clinical/GlucoseValue';
 import { TrendIndicator } from '../components/clinical/TrendIndicator';
 import { MetricCard } from '../components/ui/MetricCard';
@@ -215,6 +216,7 @@ export function PatientDashboard({
         </aside>
 
         <section className="space-y-6">
+          <BolusSuggestionCard />
           <section className="surface min-w-0 overflow-hidden p-5">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Syringe size={20} /> Manual bolus log</h2>
             <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">

@@ -103,3 +103,22 @@ test('no-CGM and previously removed dashboard sections remain unchanged', () => 
   expect(screen.queryByText('My medical info')).toBeNull();
   expect(screen.queryByText('Care-team messages')).toBeNull();
 });
+
+test('bolus suggestion prototype switches demo states and reveals matching sample inputs', () => {
+  render(<Harness />);
+
+  expect(screen.getByText('Meal bolus estimate')).toBeTruthy();
+  expect(screen.getByText('Lunch · 45 g carbs')).toBeTruthy();
+  expect(screen.getByLabelText('Dose unavailable').textContent).toBe('— U');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+  expect(screen.getByText('Sample inputs')).toBeTruthy();
+  expect(screen.getByText('45 g')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'High glucose' }));
+  expect(screen.getByText('Correction bolus estimate')).toBeTruthy();
+  expect(screen.getByText('Glucose above your target')).toBeTruthy();
+  expect(screen.getByText('214 mg/dL · Sample reading at 23:00')).toBeTruthy();
+  expect(screen.getByText('70–180 mg/dL')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'High glucose' }).getAttribute('aria-pressed')).toBe('true');
+});
