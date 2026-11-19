@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glucotwin/data/sync_api.dart';
+import 'package:glucotwin/patient_app.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -80,6 +81,48 @@ void main() {
     expect(row['value'], 0);
     expect(row['recordedAt'], recordedAt);
     expect(row['syncState'], 'pending');
+  });
+
+  test('simplified food and bolus payloads survive an app restart', () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    final first = SyncApi(store: store);
+    await first.restore();
+    final submittedAt = DateTime.parse('2026-11-19T11:12:00+02:00');
+    await first.queueAdd(
+        'bolus',
+        buildMobileBolusEntry(
+            id: 'restart-dose',
+            patientId: 'patient-a',
+            patientName: 'Patient A',
+            units: 2.5,
+            submittedAt: submittedAt,
+            localTimeLabel: '1:12 PM'));
+    await first.queueAdd(
+        'food',
+        buildMobileFoodEntry(
+            id: 'restart-meal',
+            patientId: 'patient-a',
+            patientName: 'Patient A',
+            meal: 'Lunch',
+            items: 'Oats',
+            carbs: 0,
+            submittedAt: submittedAt,
+            localTimeLabel: '1:12 PM'));
+
+    final relaunched = SyncApi(store: store);
+    await relaunched.restore();
+    final snapshot = await relaunched.localSnapshot();
+    final bolus = (snapshot['bolus'] as List).single as Map;
+    final food = (snapshot['food'] as List).single as Map;
+    expect(bolus['administeredUnits'], 2.5);
+    expect(bolus.containsKey('meal'), isFalse);
+    expect(bolus.containsKey('carbsG'), isFalse);
+    expect(food, containsPair('status', 'eaten'));
+    expect(food, containsPair('consumedCarbsG', 0));
+    expect(food['actualEatingAt'], food['plannedEatingAt']);
+    expect(bolus['syncState'], 'pending');
+    expect(food['syncState'], 'pending');
   });
 
   test('outbox is isolated from a different signed-in account', () async {

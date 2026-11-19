@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'data/sync_api.dart';
 
-const green = Color(0xFF047857);
-const darkGreen = Color(0xFF064E3B);
-const background = Color(0xFFF4F8F5);
-const muted = Color(0xFF667085);
+const green = Color(0xFF237BB6);
+const darkGreen = Color(0xFF072E50);
+const background = Color(0xFFF1F6FB);
+const muted = Color(0xFF5F7487);
+const dashboardCyan = Color(0xFF22B8D6);
+const dashboardIce = Color(0xFFE1F0FA);
+const dashboardBorder = Color(0xFFD7E8F3);
 const authNavy = Color(0xFF072E50);
 const authNavyDeep = Color(0xFF061F39);
 const authBlue = Color(0xFF237BB6);
@@ -52,11 +55,105 @@ List<Map<String, dynamic>> chronologicalConversationMessages(dynamic rows) {
   return messages;
 }
 
-String insulinCarbsLabel(Map<String, dynamic> item) {
-  final canonical = item['carbsG'];
-  if (canonical is num) return '${canonical}g';
-  final legacy = '${item['carbs'] ?? ''}'.trim();
-  return legacy.isEmpty || legacy == 'Not provided' ? 'Not provided' : legacy;
+DateTime? clinicalTimestamp(dynamic value) {
+  if (value is! String || value.trim().isEmpty) return null;
+  return DateTime.tryParse(value)?.toLocal();
+}
+
+String formatClinicalDateTime(dynamic value) {
+  final date = clinicalTimestamp(value);
+  if (date == null) return 'Date unavailable';
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
+  final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+  final minute = date.minute.toString().padLeft(2, '0');
+  final period = date.hour < 12 ? 'AM' : 'PM';
+  return '${date.day} ${months[date.month - 1]} ${date.year} · $hour:$minute $period';
+}
+
+dynamic foodHistoryTimestamp(Map<String, dynamic> item) =>
+    item['status'] == 'eaten'
+        ? item['actualEatingAt']
+        : item['plannedEatingAt'];
+
+String foodHistoryDateLabel(Map<String, dynamic> item) {
+  final label = item['status'] == 'eaten' ? 'Eaten' : 'Planned';
+  return '$label: ${formatClinicalDateTime(foodHistoryTimestamp(item))}';
+}
+
+String bolusUnitsLabel(Map<String, dynamic> item) {
+  final units = item['administeredUnits'];
+  if (units is num) return '$units U';
+  final recorded = '${item['recorded'] ?? ''}'.trim();
+  return recorded.isEmpty ? 'Units unavailable' : recorded;
+}
+
+int compareClinicalHistory(Map<String, dynamic> left,
+    Map<String, dynamic> right, dynamic Function(Map<String, dynamic>) value) {
+  final leftTime = clinicalTimestamp(value(left));
+  final rightTime = clinicalTimestamp(value(right));
+  if (leftTime == null) return rightTime == null ? 0 : 1;
+  if (rightTime == null) return -1;
+  return rightTime.compareTo(leftTime);
+}
+
+Map<String, dynamic> buildMobileBolusEntry({
+  required String id,
+  required String patientId,
+  required String patientName,
+  required double units,
+  required DateTime submittedAt,
+  required String localTimeLabel,
+}) =>
+    {
+      'id': id,
+      'patientSlug': patientId,
+      'patient': patientName,
+      'time': localTimeLabel,
+      'administeredUnits': units,
+      'recorded': '$units U',
+      'administeredAt': submittedAt.toUtc().toIso8601String(),
+    };
+
+Map<String, dynamic> buildMobileFoodEntry({
+  required String id,
+  required String patientId,
+  required String patientName,
+  required String meal,
+  required String items,
+  required double carbs,
+  required DateTime submittedAt,
+  required String localTimeLabel,
+}) {
+  final eventAt = submittedAt.toUtc().toIso8601String();
+  return {
+    'id': id,
+    'patientSlug': patientId,
+    'patient': patientName,
+    'time': localTimeLabel,
+    'meal': meal,
+    'items': items,
+    'carbs': '${carbs}g',
+    'impact': 'Pending CGM impact',
+    'status': 'eaten',
+    'plannedEatingAt': eventAt,
+    'actualEatingAt': eventAt,
+    'announcedCarbsG': carbs,
+    'consumedCarbsG': carbs,
+    'confirmAnnouncedAmount': true,
+  };
 }
 
 class PatientMobileApp extends StatefulWidget {
@@ -173,18 +270,32 @@ class _PatientMobileAppState extends State<PatientMobileApp> {
           useMaterial3: true,
           scaffoldBackgroundColor: background,
           colorScheme: ColorScheme.fromSeed(
-              seedColor: green, primary: green, surface: Colors.white),
+              seedColor: green,
+              primary: green,
+              secondary: dashboardCyan,
+              surface: Colors.white,
+              primaryContainer: dashboardIce),
           appBarTheme: const AppBarTheme(
               backgroundColor: Colors.white, foregroundColor: darkGreen),
           inputDecorationTheme: InputDecorationTheme(
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(6))),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: dashboardBorder)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: dashboardBorder)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: green, width: 1.5))),
           cardTheme: CardThemeData(
               color: Colors.white,
-              elevation: 0,
+              elevation: 1,
+              shadowColor: authNavy.withValues(alpha: 0.08),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(7),
-                  side: const BorderSide(color: Color(0xFFE4E7EC)))),
+                  borderRadius: BorderRadius.circular(16),
+                  side: const BorderSide(color: dashboardBorder))),
         ),
         home: loading
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
@@ -1215,10 +1326,18 @@ class _PatientPortalState extends State<PatientPortal>
               children: [
                 if (widget.error != null) _notice(widget.error!),
                 if (actionError != null) _notice(actionError!),
-                if (tab == 0) _overview(),
-                if (tab == 1) _records(),
-                if (tab == 2) _care(),
-                if (tab == 3) _profile(),
+                AnimatedSwitcher(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 180),
+                    child: KeyedSubtree(
+                        key: ValueKey(tab),
+                        child: switch (tab) {
+                          0 => _overview(),
+                          1 => _records(),
+                          2 => _care(),
+                          _ => _profile(),
+                        }))
               ])),
       bottomNavigationBar: NavigationBar(
           selectedIndex: tab,
@@ -1265,17 +1384,15 @@ class _PatientPortalState extends State<PatientPortal>
       Text(text, style: const TextStyle(color: muted));
 
   Widget _overview() {
-    final readings = list('glucose').cast<Map<String, dynamic>>()
+    final food = list('food')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
+      ..sort((a, b) => compareClinicalHistory(a, b, foodHistoryTimestamp));
+    final bolus = list('bolus')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
       ..sort((a, b) =>
-          (a['recordedAt'] as String).compareTo(b['recordedAt'] as String));
-    final latest = readings.isEmpty ? null : readings.last;
-    final chartReadings = readings.length > 12
-        ? readings.sublist(readings.length - 12)
-        : readings;
-    final food = list('food').cast<Map<String, dynamic>>();
-    final bolus = list('bolus').cast<Map<String, dynamic>>();
-    final messages =
-        chronologicalConversationMessages(widget.snapshot['messages']);
+          compareClinicalHistory(a, b, (item) => item['administeredAt']));
     final demo = widget.snapshot['demo'] as Map<String, dynamic>?;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Text('Hello, ${profile['fullName'] ?? 'Patient'}',
@@ -1286,65 +1403,14 @@ class _PatientPortalState extends State<PatientPortal>
           style: TextStyle(color: muted)),
       const SizedBox(height: 16),
       if (demo != null) ..._demoDashboard(demo),
-      Row(children: [
-        Expanded(
-            child: FilledButton.icon(
-                onPressed: () => setState(() => tab = 1),
-                icon: const Icon(Icons.add),
-                label: const Text('Record'))),
-        const SizedBox(width: 8),
-        Expanded(
-            child: OutlinedButton.icon(
-                onPressed: () => setState(() => tab = 2),
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Text('Care team')))
-      ]),
+      FilledButton.icon(
+          onPressed: () => setState(() => tab = 1),
+          icon: const Icon(Icons.add),
+          label: const Text('Record food or insulin')),
       const SizedBox(height: 8),
-      _panel(
-          'Latest manual reading',
-          latest == null
-              ? _empty('No readings yet. Record a glucose value to begin.')
-              : Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('${latest['value']}',
-                      style: const TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.bold,
-                          color: darkGreen)),
-                  const Padding(
-                      padding: EdgeInsets.only(bottom: 7, left: 5),
-                      child: Text('mg/dL')),
-                  const Spacer(),
-                  Text('${latest['time']}',
-                      style: const TextStyle(color: muted))
-                ])),
-      if (chartReadings.length >= 2)
-        _panel(
-            'Reading trend',
-            SizedBox(
-                height: 190,
-                child: LineChart(LineChartData(
-                  gridData: const FlGridData(show: true),
-                  borderData: FlBorderData(show: false),
-                  titlesData: const FlTitlesData(show: false),
-                  lineBarsData: [
-                    LineChartBarData(
-                        spots: chartReadings
-                            .asMap()
-                            .entries
-                            .map((entry) => FlSpot(entry.key.toDouble(),
-                                (entry.value['value'] as num).toDouble()))
-                            .toList(),
-                        isCurved: false,
-                        color: green,
-                        barWidth: 3,
-                        dotData: const FlDotData(show: true))
-                  ],
-                )))),
       _panel(
           'Recorded totals',
           Column(children: [
-            _countRow(
-                Icons.bloodtype_outlined, 'Manual readings', readings.length),
             _countRow(
                 Icons.restaurant_outlined, 'Food entries', list('food').length),
             _countRow(
@@ -1367,8 +1433,8 @@ class _PatientPortalState extends State<PatientPortal>
                           leading: const Icon(Icons.restaurant_outlined,
                               color: green),
                           title: Text('${item['meal']}: ${item['items']}'),
-                          subtitle: Text('${item['carbs']} carbs'),
-                          trailing: Text('${item['time'] ?? ''}')))
+                          subtitle: Text(
+                              '${item['carbs']} carbs\n${foodHistoryDateLabel(item)}')))
                       .toList())),
       _panel(
           'Manual bolus log',
@@ -1381,43 +1447,15 @@ class _PatientPortalState extends State<PatientPortal>
                           contentPadding: EdgeInsets.zero,
                           leading:
                               const Icon(Icons.vaccines_outlined, color: green),
-                          title: Text('${item['recorded']} · ${item['meal']}'),
-                          subtitle: Text('Carbs: ${insulinCarbsLabel(item)}'),
-                          trailing: Text('${item['time'] ?? ''}')))
+                          title: Text(bolusUnitsLabel(item)),
+                          subtitle: Text(
+                              formatClinicalDateTime(item['administeredAt']))))
                       .toList())),
-      _panel(
-          'Care-team messages',
-          messages.isEmpty
-              ? _empty(assignment?['status'] == 'accepted'
-                  ? 'No messages yet.'
-                  : 'Messaging opens when your doctor accepts.')
-              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(
-                      '${messages.last['from'] == 'patient' ? 'You' : doctor?['doctorProfile']?['fullName'] ?? 'Doctor'}: ${messages.last['text']}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                      onPressed: () => setState(() => tab = 2),
-                      icon: const Icon(Icons.arrow_forward),
-                      label: const Text('Open conversation'))
-                ])),
-      _panel(
-          'My medical info',
-          Column(children: [
-            _detail('Age', '${profile['age'] ?? ''}'),
-            _detail('Weight', '${profile['weight'] ?? ''} kg'),
-            _detail('Height', '${profile['height'] ?? ''} cm'),
-            _detail('Diabetes type', _profileText(profile['diabetesType'])),
-            _detail('Insulin plan', '${profile['insulinPlan'] ?? 'Not added'}')
-          ])),
       if (demo == null) ...[
-        _panel(
-            'CGM and digital twin',
-            _empty(
-                'No connected CGM or validated forecast is available. Manual readings above are your recorded values.')),
+        _panel('CGM and digital twin',
+            _empty('No connected CGM or validated forecast is available yet.')),
         _notice(
-            'No live CGM or validated prediction feed is connected. These are manually entered values, not treatment recommendations.'),
+            'No live CGM or validated prediction feed is connected. Predictions will appear when a supported feed is available.'),
       ],
     ]);
   }
@@ -1466,7 +1504,7 @@ class _PatientPortalState extends State<PatientPortal>
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _sampleChart(forecast, forecast: true),
             const SizedBox(height: 8),
-            const Text('Green: sample history. Amber: simulated forecast.',
+            const Text('Blue: sample history. Amber: simulated forecast.',
                 style: TextStyle(fontSize: 12, color: muted))
           ])),
     ];
@@ -1586,83 +1624,73 @@ class _PatientPortalState extends State<PatientPortal>
     ]);
   }
 
-  Widget _records() =>
-      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _panel(
-            'Glucose',
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FilledButton.icon(
-                  onPressed: () => _entryDialog('glucose'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Record reading')),
-              const SizedBox(height: 8),
-              ...list('glucose').take(5).map((raw) {
-                final item = raw as Map<String, dynamic>;
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${item['value']} mg/dL'),
-                    subtitle: _syncStatus(item),
-                    trailing: Text('${item['time']}'));
-              }),
-              if (list('glucose').isEmpty) _empty('No readings yet.')
-            ])),
-        _panel(
-            'Food',
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FilledButton.icon(
-                  onPressed: () => _entryDialog('food'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add food')),
-              const SizedBox(height: 8),
-              ...list('food').take(5).map((raw) {
-                final item = raw as Map<String, dynamic>;
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${item['meal']}: ${item['items']}'),
-                    subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('${item['carbs']} carbs · ${item['status']}'),
-                          _syncStatus(item),
-                          if (item['status'] == 'planned')
-                            Wrap(spacing: 8, children: [
-                              TextButton(
-                                  onPressed: () => _updateMeal(item, 'eaten'),
-                                  child: const Text('Mark eaten')),
-                              TextButton(
-                                  onPressed: () =>
-                                      _updateMeal(item, 'cancelled'),
-                                  child: const Text('Cancel'))
-                            ])
-                        ]),
-                    trailing: Text('${item['time']}'));
-              }),
-              if (list('food').isEmpty) _empty('No food entries yet.')
-            ])),
-        _panel(
-            'Manual bolus',
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FilledButton.icon(
-                  onPressed: () => _entryDialog('bolus'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Log bolus')),
-              const SizedBox(height: 8),
-              ...list('bolus').take(5).map((raw) {
-                final item = raw as Map<String, dynamic>;
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${item['recorded']} at ${item['meal']}'),
-                    subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Carbs: ${insulinCarbsLabel(item)}'),
-                          _syncStatus(item)
-                        ]),
-                    trailing: Text('${item['time']}'));
-              }),
-              if (list('bolus').isEmpty) _empty('No bolus logs yet.')
-            ])),
-      ]);
+  Widget _records() {
+    final food = list('food')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
+      ..sort((a, b) => compareClinicalHistory(a, b, foodHistoryTimestamp));
+    final bolus = list('bolus')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
+      ..sort((a, b) =>
+          compareClinicalHistory(a, b, (item) => item['administeredAt']));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _panel(
+          'Food',
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            FilledButton.icon(
+                onPressed: () => _entryDialog('food'),
+                icon: const Icon(Icons.add),
+                label: const Text('Add food')),
+            const SizedBox(height: 8),
+            ...food.take(5).map((item) {
+              return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${item['meal']}: ${item['items']}'),
+                  subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${item['carbs']} carbs · ${item['status']}'),
+                        Text(foodHistoryDateLabel(item),
+                            style: const TextStyle(color: muted)),
+                        _syncStatus(item),
+                        if (item['status'] == 'planned')
+                          Wrap(spacing: 8, children: [
+                            TextButton(
+                                onPressed: () => _updateMeal(item, 'eaten'),
+                                child: const Text('Mark eaten')),
+                            TextButton(
+                                onPressed: () => _updateMeal(item, 'cancelled'),
+                                child: const Text('Cancel'))
+                          ])
+                      ]));
+            }),
+            if (food.isEmpty) _empty('No food entries yet.')
+          ])),
+      _panel(
+          'Manual bolus',
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            FilledButton.icon(
+                onPressed: () => _entryDialog('bolus'),
+                icon: const Icon(Icons.add),
+                label: const Text('Log bolus')),
+            const SizedBox(height: 8),
+            ...bolus.take(5).map((item) {
+              return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(bolusUnitsLabel(item)),
+                  subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(formatClinicalDateTime(item['administeredAt']),
+                            style: const TextStyle(color: muted)),
+                        _syncStatus(item)
+                      ]));
+            }),
+            if (bolus.isEmpty) _empty('No bolus logs yet.')
+          ])),
+    ]);
+  }
 
   Future<void> _entryDialog(String kind) async {
     await showDialog<void>(
@@ -2146,7 +2174,6 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
   final first = TextEditingController();
   final second = TextEditingController();
   String meal = 'Lunch';
-  String mealStatus = 'planned';
   bool saving = false;
   String? error;
 
@@ -2167,22 +2194,16 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
       setState(() => error = 'Enter glucose between 20 and 600 mg/dL.');
       return;
     }
+    final foodCarbs = double.tryParse(second.text.trim());
     if (widget.kind == 'food' &&
         (first.text.trim().isEmpty ||
-            (double.tryParse(second.text) ?? -1) < 0)) {
+            foodCarbs == null ||
+            !foodCarbs.isFinite ||
+            foodCarbs < 0)) {
       setState(() => error = 'Enter food and non-negative carbohydrates.');
       return;
     }
-    final carbsText = first.text.trim();
-    final bolusCarbs = carbsText.isEmpty ? null : double.tryParse(carbsText);
-    final bolusUnits = double.tryParse(second.text.trim());
-    if (widget.kind == 'bolus' &&
-        ((bolusCarbs != null && (!bolusCarbs.isFinite || bolusCarbs < 0)) ||
-            (carbsText.isNotEmpty && bolusCarbs == null))) {
-      setState(() =>
-          error = 'Carbs must be a finite, non-negative number or left blank.');
-      return;
-    }
+    final bolusUnits = double.tryParse(first.text.trim());
     if (widget.kind == 'bolus' &&
         (bolusUnits == null || !bolusUnits.isFinite || bolusUnits < 0)) {
       setState(() => error = 'Enter a finite, non-negative insulin dose.');
@@ -2195,38 +2216,31 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
     final now = DateTime.now();
     final eventAt = now.toUtc().toIso8601String();
     final id = now.microsecondsSinceEpoch.toRadixString(36);
+    final localTimeLabel = TimeOfDay.fromDateTime(now).format(context);
     final common = {
       'id': id,
       'patientSlug': widget.patientId,
-      'time': TimeOfDay.fromDateTime(now).format(context)
+      'time': localTimeLabel
     };
     final item = widget.kind == 'glucose'
         ? {...common, 'value': firstNumber, 'recordedAt': eventAt}
         : widget.kind == 'food'
-            ? {
-                ...common,
-                'patient': widget.patientName,
-                'meal': meal,
-                'items': first.text.trim(),
-                'carbs': '${second.text}g',
-                'impact': 'Pending CGM impact',
-                'status': mealStatus,
-                'plannedEatingAt': eventAt,
-                if (mealStatus == 'eaten') ...{
-                  'actualEatingAt': eventAt,
-                  'confirmAnnouncedAmount': true
-                }
-              }
-            : {
-                ...common,
-                'patient': widget.patientName,
-                'meal': meal,
-                if (bolusCarbs != null) 'carbsG': bolusCarbs,
-                'recommended': 'Doctor review',
-                'administeredUnits': bolusUnits,
-                'recorded': '$bolusUnits U',
-                'administeredAt': eventAt
-              };
+            ? buildMobileFoodEntry(
+                id: id,
+                patientId: widget.patientId,
+                patientName: widget.patientName,
+                meal: meal,
+                items: first.text.trim(),
+                carbs: foodCarbs!,
+                submittedAt: now,
+                localTimeLabel: localTimeLabel)
+            : buildMobileBolusEntry(
+                id: id,
+                patientId: widget.patientId,
+                patientName: widget.patientName,
+                units: bolusUnits!,
+                submittedAt: now,
+                localTimeLabel: localTimeLabel);
     try {
       await widget.onSave(item);
       if (mounted) Navigator.pop(context);
@@ -2248,7 +2262,7 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                 : 'Log bolus'),
         content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (widget.kind != 'glucose')
+          if (widget.kind == 'food')
             DropdownButtonFormField<String>(
                 initialValue: meal,
                 decoration: const InputDecoration(labelText: 'Meal'),
@@ -2258,20 +2272,6 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                     .toList(),
                 onChanged:
                     saving ? null : (value) => setState(() => meal = value!)),
-          if (widget.kind == 'food') ...[
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-                initialValue: mealStatus,
-                decoration: const InputDecoration(labelText: 'Meal state'),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'planned', child: Text('Plan for later')),
-                  DropdownMenuItem(value: 'eaten', child: Text('Already eaten'))
-                ],
-                onChanged: saving
-                    ? null
-                    : (value) => setState(() => mealStatus = value!))
-          ],
           const SizedBox(height: 12),
           TextField(
               enabled: !saving,
@@ -2284,16 +2284,14 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                       ? 'Glucose mg/dL'
                       : widget.kind == 'food'
                           ? 'Food items'
-                          : 'Carbs (g, optional)')),
-          if (widget.kind != 'glucose') ...[
+                          : 'Bolus units')),
+          if (widget.kind == 'food') ...[
             const SizedBox(height: 12),
             TextField(
                 enabled: !saving,
                 controller: second,
                 keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                    labelText:
-                        widget.kind == 'food' ? 'Carbs g' : 'Bolus units'))
+                decoration: const InputDecoration(labelText: 'Carbs g'))
           ],
           if (error != null)
             Padding(
