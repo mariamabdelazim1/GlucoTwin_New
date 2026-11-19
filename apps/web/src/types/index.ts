@@ -149,14 +149,16 @@ export interface BolusEntry {
   patientSlug: string;
   patient: string;
   time: string;
-  meal: string;
-  carbs: string;
+  /** Historical meal context. New manual bolus logs do not collect it. */
+  meal?: string;
+  /** Historical carbohydrate context. New manual bolus logs do not collect it. */
+  carbs?: string;
   carbsG?: number | null;
   /** Optional contextual link. Carbohydrate totals remain sourced from the meal record. */
   mealId?: string | null;
   /** Historical compatibility context. New insulin logs do not collect this. */
   preMeal?: string;
-  recommended: string;
+  recommended?: string;
   recorded: string;
   administeredUnits?: number;
   administeredAt?: string;
