@@ -12,11 +12,11 @@ const meals = [
   { id: 'legacy-meal', patientSlug: 'p1', patient: 'Synthetic Patient', time: '18:00', meal: 'Snack', items: 'Fruit', carbs: '12g', impact: 'Recorded', status: 'Reviewed' },
 ];
 
-function Harness({ initialFood = meals, initialBolus = [] }) {
+function Harness({ initialFood = meals, initialBolus = [], focusFood = false, activePatient = patient }) {
   const [bolus, setBolus] = useState(initialBolus);
   const [food, setFood] = useState(initialFood);
   return <MemoryRouter>
-    <PatientDashboard patient={patient} doctorName="Doctor" assignmentStatus="accepted" foodEntries={food} setFoodEntries={setFood} bolusEntries={bolus} setBolusEntries={setBolus} />
+    <PatientDashboard focusFood={focusFood} patient={activePatient} doctorName="Doctor" assignmentStatus="accepted" foodEntries={food} setFoodEntries={setFood} bolusEntries={bolus} setBolusEntries={setBolus} />
     <output data-testid="bolus-state">{JSON.stringify(bolus)}</output>
     <output data-testid="food-state">{JSON.stringify(food)}</output>
   </MemoryRouter>;
@@ -122,4 +122,39 @@ test('bolus recommendation prototype switches demo states and reveals matching s
   expect(screen.getByText('214 mg/dL · Sample reading at 23:00')).toBeTruthy();
   expect(screen.getByText('70–180 mg/dL')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'High glucose' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+test('Food Log route renders only the two log sections before and after new entries', () => {
+  const demoPatient = {
+    ...patient,
+    slug: 'omar-hassan',
+    usesCgm: true,
+    currentGlucose: 142,
+    trend: 'Falling',
+    timeInRange: 79,
+    lastReading: 'Sample day, 23:00',
+  };
+  render(<Harness focusFood activePatient={demoPatient} initialFood={[]} initialBolus={[]} />);
+
+  expect(screen.getByRole('heading', { name: 'Food' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Manual bolus log' })).toBeTruthy();
+  expect(document.querySelectorAll('.patient-log-region .surface')).toHaveLength(2);
+  expect(screen.queryByText(/Welcome,/)).toBeNull();
+  expect(screen.queryByText(/Demo patient:/)).toBeNull();
+  expect(screen.queryByText('Current Glucose')).toBeNull();
+  expect(screen.queryByText('Bolus Recommendation')).toBeNull();
+  expect(screen.queryByText('Predicted Glucose')).toBeNull();
+  expect(screen.queryByText('CGM Graph')).toBeNull();
+  expect(screen.queryByText('Digital Twin Forecast Graph')).toBeNull();
+
+  fireEvent.change(screen.getByPlaceholderText('Food items'), { target: { value: 'Rice and chicken' } });
+  fireEvent.change(screen.getByLabelText('Carbohydrates in grams'), { target: { value: '45' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add food' }));
+  fireEvent.change(screen.getByLabelText('Bolus units'), { target: { value: '3' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+
+  expect(screen.getByText('Rice and chicken')).toBeTruthy();
+  expect(screen.getByText('3 U')).toBeTruthy();
+  expect(document.querySelectorAll('.patient-log-region .surface')).toHaveLength(2);
+  expect(screen.queryByText('Predicted Glucose')).toBeNull();
 });

@@ -167,17 +167,19 @@ export function PatientDashboard({
 
   return (
     <div className="patient-dashboard-content">
-      <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and insulin records in one place.' : 'Your food and insulin records in one place.'} />
-      {patient.slug === 'omar-hassan' ? <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo patient: sample CGM readings, forecasts, and historical logs. This is not a live sensor feed.</div> : null}
-      {assignmentStatus !== 'accepted' ? <div className="surface mb-6 p-4 text-sm"><strong>Doctor request {assignmentStatus}</strong><p className="mt-1 text-clinical-muted">{doctorName} will appear here after accepting your request. You can still record food and insulin.</p></div> : null}
-      {patient.usesCgm ? (
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard blue label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
-        <MetricCard blue label="Trend" value={patient.trend} sub="Latest CGM direction" />
-        <MetricCard blue label="Time in Range" value={`${patient.timeInRange}%`} sub="Today" />
-        <MetricCard blue label="Last CGM Reading" value={patient.lastReading} sub="Sample sensor data" />
-      </div>
-      ) : <section className="surface p-5"><h2 className="font-semibold">No CGM connected yet</h2><p className="mt-1 text-sm text-clinical-muted">Glucose charts and forecasts will appear when CGM data is available.</p></section>}
+      {!focusFood ? <>
+        <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and insulin records in one place.' : 'Your food and insulin records in one place.'} />
+        {patient.slug === 'omar-hassan' ? <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo patient: sample CGM readings, forecasts, and historical logs. This is not a live sensor feed.</div> : null}
+        {assignmentStatus !== 'accepted' ? <div className="surface mb-6 p-4 text-sm"><strong>Doctor request {assignmentStatus}</strong><p className="mt-1 text-clinical-muted">{doctorName} will appear here after accepting your request. You can still record food and insulin.</p></div> : null}
+        {patient.usesCgm ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard blue label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
+          <MetricCard blue label="Trend" value={patient.trend} sub="Latest CGM direction" />
+          <MetricCard blue label="Time in Range" value={`${patient.timeInRange}%`} sub="Today" />
+          <MetricCard blue label="Last CGM Reading" value={patient.lastReading} sub="Sample sensor data" />
+        </div>
+        ) : <section className="surface p-5"><h2 className="font-semibold">No CGM connected yet</h2><p className="mt-1 text-sm text-clinical-muted">Glucose charts and forecasts will appear when CGM data is available.</p></section>}
+      </> : null}
 
       <div className={focusFood ? 'patient-log-region mt-6' : 'mt-6 grid gap-6 xl:grid-cols-[340px_1fr]'}>
         <aside className={`patient-log-food surface min-w-0 p-5 ${focusFood ? 'ring-2 ring-clinical-primary' : ''}`}>
@@ -217,8 +219,8 @@ export function PatientDashboard({
           </div>
         </aside>
 
-        <section className={focusFood ? 'patient-log-items' : 'space-y-6'}>
-          <div className="patient-log-recommendation"><BolusSuggestionCard /></div>
+        <div className={focusFood ? 'patient-log-items' : 'space-y-6'}>
+          {!focusFood ? <div className="patient-log-recommendation"><BolusSuggestionCard /></div> : null}
           <section className="patient-log-bolus surface min-w-0 overflow-hidden p-5">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Syringe size={20} /> Manual bolus log</h2>
             <div className="patient-bolus-controls mt-4 grid min-w-0 gap-3">
@@ -235,7 +237,7 @@ export function PatientDashboard({
               ))}
             </div>
           </section>
-          {patient.usesCgm ? <section className="patient-log-monitoring surface min-w-0 overflow-hidden p-5">
+          {!focusFood && patient.usesCgm ? <section className="patient-log-monitoring surface min-w-0 overflow-hidden p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xl font-semibold"><TrendingUp size={20} /> Predicted Glucose</h2>
               <span className="text-sm font-semibold text-clinical-muted">Simulated digital twin</span>
@@ -251,18 +253,18 @@ export function PatientDashboard({
               ))}
             </div>
           </section> : null}
-          {patient.usesCgm ? <section className="patient-log-monitoring surface p-5">
+          {!focusFood && patient.usesCgm ? <section className="patient-log-monitoring surface p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xl font-semibold"><Activity size={20} /> CGM Graph</h2>
               <div className="text-sm"><GlucoseValue value={patient.currentGlucose} /> <span className="ml-2"><TrendIndicator trend={patient.trend} /></span></div>
             </div>
             <CGMChart blue data={cgmReadings} />
           </section> : null}
-          {patient.usesCgm ? <section className="patient-log-monitoring surface min-w-0 overflow-hidden p-5">
+          {!focusFood && patient.usesCgm ? <section className="patient-log-monitoring surface min-w-0 overflow-hidden p-5">
             <h2 className="text-xl font-semibold">Digital Twin Forecast Graph</h2>
             <DigitalTwinChart blue data={digitalTwinForecast} />
           </section> : null}
-        </section>
+        </div>
       </div>
     </div>
   );
