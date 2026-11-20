@@ -8,6 +8,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:glucotwin/data/sync_api.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:glucotwin/presentation/widgets/bolus_recommendation_card.dart';
+import 'package:glucotwin/presentation/widgets/portal_message_bubble.dart';
+import 'package:glucotwin/core/constants/app_colors.dart';
 
 void main() {
   test('mobile clinical payloads match the units-only and eaten-food contracts',
@@ -152,6 +154,42 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+      'portal message bubbles style existing and newly sent outgoing messages',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              PortalMessageBubble(text: 'Existing outgoing', outgoing: true),
+              PortalMessageBubble(text: 'Newly sent outgoing', outgoing: true),
+              PortalMessageBubble(text: 'Incoming message', outgoing: false),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    BoxDecoration decorationFor(String text) {
+      final container = tester.widget<Container>(find
+          .ancestor(of: find.text(text), matching: find.byType(Container))
+          .first);
+      return container.decoration! as BoxDecoration;
+    }
+
+    for (final text in ['Existing outgoing', 'Newly sent outgoing']) {
+      final decoration = decorationFor(text);
+      expect(decoration.color, AppColors.portalIceBlue);
+      expect(decoration.border!.top.color, AppColors.portalBorder);
+      expect(tester.widget<Text>(find.text(text)).style!.color,
+          AppColors.portalNavy);
+    }
+    final incoming = decorationFor('Incoming message');
+    expect(incoming.color, Colors.white);
+    expect(incoming.border!.top.color, AppColors.portalBorder);
+  });
+
   testWidgets('record screen exposes simplified food and bolus entry controls',
       (tester) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -250,5 +288,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('Oldest message')).dy,
         lessThan(tester.getTopLeft(find.text('Newest message')).dy));
+    final incoming = tester.widget<Container>(find
+        .ancestor(
+            of: find.text('Oldest message'), matching: find.byType(Container))
+        .first);
+    final outgoing = tester.widget<Container>(find
+        .ancestor(
+            of: find.text('Newest message'), matching: find.byType(Container))
+        .first);
+    expect((incoming.decoration as BoxDecoration).color, Colors.white);
+    expect((incoming.decoration as BoxDecoration).border!.top.color,
+        AppColors.portalBorder);
+    expect(
+        (outgoing.decoration as BoxDecoration).color, AppColors.portalIceBlue);
+    expect((outgoing.decoration as BoxDecoration).border!.top.color,
+        AppColors.portalBorder);
+    expect(find.byType(PortalMessageBubble), findsNWidgets(2));
   });
 }

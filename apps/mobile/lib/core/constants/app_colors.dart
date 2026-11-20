@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
+  // ── Patient Portal ────────────────────────────────────────────────────────
+  static const Color portalNavy = Color(0xFF072E50);
+  static const Color portalBlue = Color(0xFF237BB6);
+  static const Color portalBackground = Color(0xFFF1F6FB);
+  static const Color portalIceBlue = Color(0xFFE1F0FA);
+  static const Color portalBorder = Color(0xFFD7E8F3);
+  static const Color portalMuted = Color(0xFF5F7487);
+
   // ── Brand Blues ──────────────────────────────────────────────────────────
   static const Color primary = Color(0xFF3B82F6);
   static const Color primaryLight = Color(0xFF60A5FA);

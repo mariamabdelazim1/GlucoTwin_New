@@ -1,16 +1,18 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'core/constants/app_colors.dart';
 import 'data/sync_api.dart';
 import 'presentation/widgets/bolus_recommendation_card.dart';
+import 'presentation/widgets/portal_message_bubble.dart';
 
-const green = Color(0xFF237BB6);
-const darkGreen = Color(0xFF072E50);
-const background = Color(0xFFF1F6FB);
-const muted = Color(0xFF5F7487);
+const green = AppColors.portalBlue;
+const darkGreen = AppColors.portalNavy;
+const background = AppColors.portalBackground;
+const muted = AppColors.portalMuted;
 const dashboardCyan = Color(0xFF22B8D6);
-const dashboardIce = Color(0xFFE1F0FA);
-const dashboardBorder = Color(0xFFD7E8F3);
+const dashboardIce = AppColors.portalIceBlue;
+const dashboardBorder = AppColors.portalBorder;
 const authNavy = Color(0xFF072E50);
 const authNavyDeep = Color(0xFF061F39);
 const authBlue = Color(0xFF237BB6);
@@ -2025,20 +2027,9 @@ class _PatientPortalState extends State<PatientPortal>
               _empty('Messaging opens after your doctor accepts your request.'),
             if (connected) ...[
               if (messages.isEmpty) _empty('No messages yet.'),
-              ...messages.map((item) => Align(
-                  alignment: item['from'] == 'patient'
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                          color: item['from'] == 'patient'
-                              ? const Color(0xFFEEF7F1)
-                              : Colors.white,
-                          border: Border.all(color: const Color(0xFFE4E7EC)),
-                          borderRadius: BorderRadius.circular(6)),
-                      child: Text('${item['text']}')))),
+              ...messages.map((item) => PortalMessageBubble(
+                  text: '${item['text']}',
+                  outgoing: item['from'] == 'patient')),
               TextField(
                   controller: draft,
                   decoration:
