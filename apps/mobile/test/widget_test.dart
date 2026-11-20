@@ -7,8 +7,123 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:glucotwin/data/sync_api.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:glucotwin/presentation/widgets/bolus_recommendation_card.dart';
+import 'package:glucotwin/presentation/widgets/portal_message_bubble.dart';
+import 'package:glucotwin/core/constants/app_colors.dart';
+
+class _ProfileTestApi extends SyncApi {
+  bool failSave = false;
+  final List<Map<String, dynamic>> savedProfiles = [];
+
+  @override
+  Future<List<Map<String, dynamic>>> emergencyContacts() async => [];
+
+  @override
+  Future<Map<String, dynamic>> updateProfile(
+      Map<String, dynamic> profile) async {
+    savedProfiles.add(Map<String, dynamic>.from(profile));
+    if (failSave) throw ApiException('Profile save failed. Try again.');
+    return {
+      'id': 'p1',
+      'email': 'patient@example.test',
+      'patientProfile': Map<String, dynamic>.from(profile),
+    };
+  }
+}
+
+class _ProfileHarness extends StatefulWidget {
+  const _ProfileHarness({required this.api});
+  final _ProfileTestApi api;
+
+  @override
+  State<_ProfileHarness> createState() => _ProfileHarnessState();
+}
+
+class _ProfileHarnessState extends State<_ProfileHarness> {
+  Map<String, dynamic> account = {
+    'id': 'p1',
+    'email': 'patient@example.test',
+    'patientProfile': {
+      'fullName': 'Omar Hassan',
+      'age': '34',
+      'weight': '82',
+      'height': '178',
+      'diabetesType': 'Type 1 Diabetes',
+      'insulinPlan': 'Basal-bolus therapy',
+      'diagnosisYear': '2012',
+      'medications': 'Insulin',
+      'allergies': 'None reported',
+      'emergencyContact': '',
+      'selectedDoctorId': 'DR-001',
+    },
+  };
+
+  @override
+  Widget build(BuildContext context) => PatientPortal(
+        api: widget.api,
+        account: account,
+        snapshot: const {},
+        error: null,
+        onRefresh: () async {},
+        onLocalChange: () async {},
+        onAccountUpdated: (value) async => setState(() => account = value),
+        onSignOut: () async {},
+      );
+}
 
 void main() {
+  test('mobile clinical payloads match the units-only and eaten-food contracts',
+      () {
+    final submittedAt = DateTime.parse('2026-11-19T11:12:00+02:00');
+    final bolus = buildMobileBolusEntry(
+        id: 'dose-1',
+        patientId: 'p1',
+        patientName: 'Patient',
+        units: 2.5,
+        submittedAt: submittedAt,
+        localTimeLabel: '1:12 PM');
+    expect(bolus['administeredAt'], '2026-11-19T09:12:00.000Z');
+    expect(bolus['administeredUnits'], 2.5);
+    expect(bolus.containsKey('meal'), isFalse);
+    expect(bolus.containsKey('mealId'), isFalse);
+    expect(bolus.containsKey('carbs'), isFalse);
+    expect(bolus.containsKey('carbsG'), isFalse);
+
+    final food = buildMobileFoodEntry(
+        id: 'meal-1',
+        patientId: 'p1',
+        patientName: 'Patient',
+        meal: 'Lunch',
+        items: 'Oats',
+        carbs: 0,
+        submittedAt: submittedAt,
+        localTimeLabel: '1:12 PM');
+    expect(food, containsPair('status', 'eaten'));
+    expect(food, containsPair('announcedCarbsG', 0));
+    expect(food, containsPair('consumedCarbsG', 0));
+    expect(food['actualEatingAt'], food['plannedEatingAt']);
+    expect(food.containsKey('glucose'), isFalse);
+  });
+
+  test(
+      'clinical history uses stored timestamps and keeps missing dates visible',
+      () {
+    final rows = <Map<String, dynamic>>[
+      {'id': 'legacy'},
+      {'id': 'before', 'administeredAt': '2026-11-18T23:55:00Z'},
+      {'id': 'after', 'administeredAt': '2026-11-19T00:05:00Z'},
+    ]..sort((a, b) =>
+        compareClinicalHistory(a, b, (item) => item['administeredAt']));
+    expect(rows.map((item) => item['id']), ['after', 'before', 'legacy']);
+    expect(formatClinicalDateTime(null), 'Date unavailable');
+    expect(
+        foodHistoryDateLabel(
+            {'status': 'planned', 'plannedEatingAt': '2026-11-18T23:55:00Z'}),
+        startsWith('Planned: '));
+    expect(foodHistoryDateLabel({'status': 'cancelled'}),
+        'Planned: Date unavailable');
+  });
+
   test('conversation messages use full timestamps with a stable ID tie-breaker',
       () {
     final rows = chronologicalConversationMessages([
@@ -53,12 +168,225 @@ void main() {
       error: null,
       onRefresh: () async {},
       onLocalChange: () async {},
+      onAccountUpdated: (_) async {},
       onSignOut: () async {},
     )));
     await tester.pumpAndSettle();
     expect(find.text('CGM graph'), findsOneWidget);
     expect(find.text('Digital twin forecast · demo'), findsOneWidget);
     expect(find.byType(LineChart), findsNWidgets(2));
+    expect(find.text('Care-team messages'), findsNothing);
+    expect(find.text('My medical info'), findsNothing);
+    expect(find.text('Latest manual reading'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('bolus recommendation switches states and opens matching details',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(child: BolusRecommendationCard()),
+        ),
+      ),
+    );
+
+    expect(find.text('Bolus Recommendation'), findsOneWidget);
+    expect(find.text('Lunch · 45 g carbs'), findsOneWidget);
+    expect(find.text('Meal bolus estimate'), findsOneWidget);
+    expect(find.text('— U'), findsOneWidget);
+
+    await tester.tap(find.text('High glucose').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Glucose above your target'), findsOneWidget);
+    expect(find.text('214 mg/dL · Sample reading at 23:00'), findsOneWidget);
+    expect(find.text('Correction bolus estimate'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('bolus-recommendation-review')));
+    await tester.pumpAndSettle();
+    expect(find.text('High glucose inputs'), findsOneWidget);
+    expect(find.text('70–180 mg/dL'), findsOneWidget);
+    expect(find.text('Visual prototype only. No dose is calculated or saved.'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'portal message bubbles style existing and newly sent outgoing messages',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              PortalMessageBubble(text: 'Existing outgoing', outgoing: true),
+              PortalMessageBubble(text: 'Newly sent outgoing', outgoing: true),
+              PortalMessageBubble(text: 'Incoming message', outgoing: false),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    BoxDecoration decorationFor(String text) {
+      final container = tester.widget<Container>(find
+          .ancestor(of: find.text(text), matching: find.byType(Container))
+          .first);
+      return container.decoration! as BoxDecoration;
+    }
+
+    for (final text in ['Existing outgoing', 'Newly sent outgoing']) {
+      final decoration = decorationFor(text);
+      expect(decoration.color, AppColors.portalIceBlue);
+      expect(decoration.border!.top.color, AppColors.portalBorder);
+      expect(tester.widget<Text>(find.text(text)).style!.color,
+          AppColors.portalNavy);
+    }
+    final incoming = decorationFor('Incoming message');
+    expect(incoming.color, Colors.white);
+    expect(incoming.border!.top.color, AppColors.portalBorder);
+  });
+
+  testWidgets('record screen exposes simplified food and bolus entry controls',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+        home: PatientPortal(
+      api: SyncApi(),
+      account: const {
+        'id': 'p1',
+        'patientProfile': {'fullName': 'Patient'}
+      },
+      snapshot: const {'food': [], 'bolus': [], 'glucose': []},
+      error: null,
+      onRefresh: () async {},
+      onLocalChange: () async {},
+      onAccountUpdated: (_) async {},
+      onSignOut: () async {},
+    )));
+    await tester.tap(find.text('Record').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Glucose'), findsNothing);
+
+    await tester.tap(find.text('Log bolus'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Bolus units'), findsOneWidget);
+    expect(find.text('Meal'), findsNothing);
+    expect(find.text('Carbs (g, optional)'), findsNothing);
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(find.text('Enter a finite, non-negative insulin dose.'),
+        findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Bolus units'), '-1');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(find.text('Enter a finite, non-negative insulin dose.'),
+        findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add food'));
+    await tester.pumpAndSettle();
+    expect(find.text('Meal'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Food items'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Carbs g'), findsOneWidget);
+    expect(find.text('Plan for later'), findsNothing);
+    expect(find.text('Already eaten'), findsNothing);
+    expect(find.text('Glucose'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('profile edit is prefilled, cancellable, and removes Basal plan',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ProfileTestApi();
+    await tester.pumpWidget(MaterialApp(home: _ProfileHarness(api: api)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Basal plan'), findsNothing);
+    expect(
+        find.text(
+            'An AI-suggested basal schedule requires confirmation by your doctor. No confirmed schedule is available here yet.'),
+        findsNothing);
+    expect(find.text('Insulin plan'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('edit-profile')));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.byKey(const ValueKey('profile-full-name')))
+            .controller!
+            .text,
+        'Omar Hassan');
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.byKey(const ValueKey('profile-insulin-plan')))
+            .controller!
+            .text,
+        'Basal-bolus therapy');
+    await tester.enterText(
+        find.byKey(const ValueKey('profile-full-name')), 'Unsaved Name');
+    await tester.tap(find.byKey(const ValueKey('cancel-profile-edit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Unsaved Name'), findsNothing);
+    expect(find.text('Omar Hassan'), findsOneWidget);
+    expect(api.savedProfiles, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'profile save failure keeps values for retry and success updates immediately',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ProfileTestApi()..failSave = true;
+    await tester.pumpWidget(MaterialApp(home: _ProfileHarness(api: api)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('edit-profile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('profile-full-name')), 'Omar Updated');
+    await tester.enterText(
+        find.byKey(const ValueKey('profile-weight')), '83.5');
+    await tester.tap(find.byKey(const ValueKey('save-profile-changes')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Profile save failed. Try again.'), findsOneWidget);
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.byKey(const ValueKey('profile-full-name')))
+            .controller!
+            .text,
+        'Omar Updated');
+    api.failSave = false;
+    await tester.tap(find.byKey(const ValueKey('save-profile-changes')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit my information'), findsNothing);
+    expect(find.text('Omar Updated'), findsOneWidget);
+    expect(find.text('83.5 kg'), findsOneWidget);
+    expect(api.savedProfiles, hasLength(2));
+    expect(api.savedProfiles.last['selectedDoctorId'], 'DR-001');
+    expect(api.savedProfiles.last['insulinPlan'], 'Basal-bolus therapy');
     expect(tester.takeException(), isNull);
   });
 
@@ -102,6 +430,7 @@ void main() {
       error: null,
       onRefresh: () async {},
       onLocalChange: () async {},
+      onAccountUpdated: (_) async {},
       onSignOut: () async {},
     )));
     await tester.pump();
@@ -109,5 +438,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('Oldest message')).dy,
         lessThan(tester.getTopLeft(find.text('Newest message')).dy));
+    final incoming = tester.widget<Container>(find
+        .ancestor(
+            of: find.text('Oldest message'), matching: find.byType(Container))
+        .first);
+    final outgoing = tester.widget<Container>(find
+        .ancestor(
+            of: find.text('Newest message'), matching: find.byType(Container))
+        .first);
+    expect((incoming.decoration as BoxDecoration).color, Colors.white);
+    expect((incoming.decoration as BoxDecoration).border!.top.color,
+        AppColors.portalBorder);
+    expect(
+        (outgoing.decoration as BoxDecoration).color, AppColors.portalIceBlue);
+    expect((outgoing.decoration as BoxDecoration).border!.top.color,
+        AppColors.portalBorder);
+    expect(find.byType(PortalMessageBubble), findsNWidgets(2));
   });
 }

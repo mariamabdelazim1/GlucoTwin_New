@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message, Patient, PatientProfile, PatientRegistrationRequest, Role } from './types';
+import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message, Patient, PatientProfile, RegistrationRequest, Role } from './types';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { Login } from './pages/Login';
@@ -34,6 +34,11 @@ import { AssignmentDecisionError, confirmAssignmentDecision } from './utils/assi
 type Session = { id: string; role: Role };
 type AssignmentAction = { state: 'pending' | 'success' | 'error'; message: string };
 const assignmentKey = (patientId: string, doctorId: string) => `${doctorId}:${patientId}`;
+
+export function usesBluePortalTheme(role: Role, pathname: string) {
+  if (role === 'doctor') return true;
+  return role === 'patient' && ['/patient/dashboard', '/patient/food', '/patient/doctors', '/messages', '/notifications', '/profile'].includes(pathname);
+}
 
 function RoleOnly({ role, allowed, children }: { role: Role; allowed: Role[]; children: ReactNode }) {
   const fallback = role === 'patient' ? '/patient/dashboard' : role === 'admin' ? '/admin' : '/dashboard';
@@ -79,15 +84,16 @@ function Shell({ session, account, accounts, assignments, assignmentActions, onA
   const currentAssignment = assignments.find((item) => item.patientId === account?.id && item.doctorId === account?.patientProfile?.selectedDoctorId);
   const selectedDoctor = accounts.find((item) => item.id === account?.patientProfile?.selectedDoctorId);
   const doctorName = selectedDoctor?.doctorProfile?.fullName || 'your doctor';
+  const bluePortalTheme = usesBluePortalTheme(role, location.pathname);
 
-  return <div className="min-h-screen bg-clinical-bg text-clinical-text lg:flex">
-    <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
+  return <div className={`min-h-screen bg-clinical-bg text-clinical-text lg:flex ${bluePortalTheme ? 'patient-dashboard-shell' : ''}`}>
+    <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} dashboardTheme={bluePortalTheme} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
     <div className="min-w-0 flex-1">
       <TopHeader title={title} role={role} account={account} />
       <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6">{syncError && role !== 'admin' ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{syncError}</div> : null}{directoryError ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{directoryError}</div> : null}<Routes>
         <Route path="/dashboard" element={<RoleOnly role={role} allowed={['doctor']}><Dashboard doctorId={session.id} doctorName={account?.doctorProfile?.fullName || 'Doctor'} patientRecords={allPatients} foodEntries={foodEntries} bolusEntries={bolusEntries} messages={messages} acceptedPatientSlugs={acceptedPatientSlugs} patientRequests={patientRequests} assignmentActions={assignmentActions} onAcceptPatient={(id) => onAssignmentDecision(id, 'accepted')} onDeclinePatient={(id) => onAssignmentDecision(id, 'declined')} /></RoleOnly>} />
-        <Route path="/patient/dashboard" element={<RoleOnly role={role} allowed={['patient']}>{currentPatient && account?.patientProfile ? <PatientDashboard patient={currentPatient} doctorName={doctorName} assignmentStatus={currentAssignment?.status || 'pending'} setMessages={setMessages} foodEntries={foodEntries} setFoodEntries={setFoodEntries} bolusEntries={bolusEntries} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} patientProfile={account.patientProfile} /> : null}</RoleOnly>} />
-        <Route path="/patient/food" element={<RoleOnly role={role} allowed={['patient']}>{currentPatient && account?.patientProfile ? <PatientDashboard focusFood patient={currentPatient} doctorName={doctorName} assignmentStatus={currentAssignment?.status || 'pending'} setMessages={setMessages} foodEntries={foodEntries} setFoodEntries={setFoodEntries} bolusEntries={bolusEntries} setBolusEntries={setBolusEntries} glucoseEntries={glucoseEntries} setGlucoseEntries={setGlucoseEntries} patientProfile={account.patientProfile} /> : null}</RoleOnly>} />
+        <Route path="/patient/dashboard" element={<RoleOnly role={role} allowed={['patient']}>{currentPatient && account?.patientProfile ? <PatientDashboard patient={currentPatient} doctorName={doctorName} assignmentStatus={currentAssignment?.status || 'pending'} foodEntries={foodEntries} setFoodEntries={setFoodEntries} bolusEntries={bolusEntries} setBolusEntries={setBolusEntries} /> : null}</RoleOnly>} />
+        <Route path="/patient/food" element={<RoleOnly role={role} allowed={['patient']}>{currentPatient && account?.patientProfile ? <PatientDashboard focusFood patient={currentPatient} doctorName={doctorName} assignmentStatus={currentAssignment?.status || 'pending'} foodEntries={foodEntries} setFoodEntries={setFoodEntries} bolusEntries={bolusEntries} setBolusEntries={setBolusEntries} /> : null}</RoleOnly>} />
         <Route path="/patient/doctors" element={<RoleOnly role={role} allowed={['patient']}><Doctors accounts={accounts} ratings={ratings} patientAccount={account} assignmentStatus={currentAssignment?.status} onChoose={onRequestDoctor} onRate={(score) => {
           if (!account?.patientProfile) return;
           const patientId = account.id;
@@ -98,7 +104,7 @@ function Shell({ session, account, accounts, assignments, assignmentActions, onA
         <Route path="/patients" element={<RoleOnly role={role} allowed={['doctor']}><Patients acceptedPatientSlugs={acceptedPatientSlugs} patientRecords={allPatients} /></RoleOnly>} />
         <Route path="/patients/:slug" element={<RoleOnly role={role} allowed={['doctor']}><PatientDetails foodEntries={foodEntries} bolusEntries={bolusEntries} glucoseEntries={glucoseEntries} acceptedPatientSlugs={acceptedPatientSlugs} patientRecords={allPatients} patientProfiles={patientProfiles} /></RoleOnly>} />
         <Route path="/messages" element={<RoleOnly role={role} allowed={['doctor', 'patient']}><Messages role={role} doctorId={role === 'doctor' ? session.id : account?.patientProfile?.selectedDoctorId || ''} currentPatient={currentPatient} doctorName={doctorName} patientRecords={allPatients} messages={messages} setMessages={setMessages} acceptedPatientSlugs={acceptedPatientSlugs} assignmentStatus={currentAssignment?.status} /></RoleOnly>} />
-        <Route path="/notifications" element={<RoleOnly role={role} allowed={['doctor', 'patient']}><Notifications role={role} patientId={currentPatient?.slug} doctorId={session.id} visiblePatientIds={[...acceptedPatientSlugs, ...patientRequests]} /></RoleOnly>} />
+        <Route path="/notifications" element={<RoleOnly role={role} allowed={['doctor', 'patient']}><Notifications role={role} accountId={session.id} selectedDoctorId={account?.patientProfile?.selectedDoctorId} doctorName={doctorName} visiblePatientIds={[...acceptedPatientSlugs, ...patientRequests]} messages={messages} setMessages={setMessages} /></RoleOnly>} />
         <Route path="/admin" element={<RoleOnly role={role} allowed={['admin']}><AdminDashboard accounts={accounts} assignments={assignments} patientRecords={allPatients} /></RoleOnly>} />
         <Route path="/admin/doctors" element={<RoleOnly role={role} allowed={['admin']}><AdminDoctors accounts={accounts} /></RoleOnly>} />
         <Route path="/admin/patients" element={<RoleOnly role={role} allowed={['admin']}><AdminPatients accounts={accounts} assignments={assignments} patientRecords={allPatients} /></RoleOnly>} />
@@ -320,7 +326,7 @@ export default function App() {
     } catch (error) { return authenticationErrorMessage(error); }
     return null;
   };
-  const register = async (request: PatientRegistrationRequest) => {
+  const register = async (request: RegistrationRequest) => {
     if (request.account.email.toLowerCase() === 'admin' || accounts.some((item) => item.email.toLowerCase() === request.account.email.toLowerCase())) return 'An account with this email already exists.';
     try {
       const created = await bridgeAccount(request);

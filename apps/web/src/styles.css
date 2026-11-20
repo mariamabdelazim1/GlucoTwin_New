@@ -40,46 +40,191 @@ textarea {
   scrollbar-width: thin;
 }
 
-.landing-wave {
-  position: relative;
-  background:
-    linear-gradient(90deg, transparent 0 9%, #e4e7ec 9% 10%, transparent 10% 19%, #e4e7ec 19% 20%, transparent 20% 29%, #e4e7ec 29% 30%, transparent 30% 39%, #e4e7ec 39% 40%, transparent 40% 49%, #e4e7ec 49% 50%, transparent 50% 59%, #e4e7ec 59% 60%, transparent 60% 69%, #e4e7ec 69% 70%, transparent 70% 79%, #e4e7ec 79% 80%, transparent 80% 89%, #e4e7ec 89% 90%, transparent 90%),
-    linear-gradient(180deg, transparent 0 31%, #e4e7ec 31% 32%, transparent 32% 64%, #e4e7ec 64% 65%, transparent 65%);
+.patient-dashboard-shell {
+  background: #f1f6fb;
+  color: #0b3555;
 }
 
-.landing-wave::before,
-.landing-wave::after {
-  content: '';
-  position: absolute;
-  inset: 10px 0 20px;
-  background-repeat: repeat-x;
-  background-size: 180px 100%;
-  animation: clinicalWave 7s linear infinite;
+.patient-dashboard-shell > .min-w-0 > header {
+  border-color: #d6e5f0;
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.landing-wave::before {
-  background-image: radial-gradient(circle at 0 62%, #047857 0 3px, transparent 4px), linear-gradient(110deg, transparent 0 12%, #047857 12% 14%, transparent 14% 26%, #047857 26% 28%, transparent 28% 41%, #047857 41% 43%, transparent 43% 56%, #047857 56% 58%, transparent 58% 72%, #047857 72% 74%, transparent 74%);
-  opacity: 0.95;
+.patient-dashboard-shell main .surface {
+  border-color: #d6e5f0;
+  border-radius: 0.875rem;
+  box-shadow: 0 8px 24px rgba(11, 53, 85, 0.06);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
-.landing-wave::after {
-  background-image: linear-gradient(105deg, transparent 0 20%, rgba(4, 120, 87, 0.35) 20% 22%, transparent 22% 46%, rgba(4, 120, 87, 0.35) 46% 48%, transparent 48% 70%, rgba(4, 120, 87, 0.35) 70% 72%, transparent 72%);
-  animation-duration: 11s;
-  opacity: 0.7;
+.patient-dashboard-shell main .surface:hover {
+  border-color: #b9d7e9;
+  box-shadow: 0 12px 30px rgba(11, 53, 85, 0.09);
 }
 
-@keyframes clinicalWave {
-  from {
-    transform: translateX(0);
+.patient-dashboard-shell .border-clinical-border {
+  border-color: #d6e5f0;
+}
+
+.patient-dashboard-shell .bg-clinical-bg {
+  background-color: #f1f6fb;
+}
+
+.patient-dashboard-shell .bg-clinical-secondary {
+  background-color: #e1f0fa;
+}
+
+.patient-dashboard-shell .bg-clinical-primary {
+  background-color: #237bb6;
+}
+
+.patient-dashboard-shell .border-clinical-primary {
+  border-color: #237bb6;
+}
+
+.patient-dashboard-shell .text-clinical-primary,
+.patient-dashboard-shell .text-clinical-primaryDark {
+  color: #176391;
+}
+
+.patient-dashboard-shell .text-clinical-text {
+  color: #0b3555;
+}
+
+.patient-dashboard-shell .text-clinical-muted {
+  color: #61788a;
+}
+
+.patient-dashboard-shell input,
+.patient-dashboard-shell select,
+.patient-dashboard-shell textarea {
+  min-width: 0;
+  border-color: #cbdde9;
+  background: #fff;
+  color: #0b3555;
+}
+
+.patient-dashboard-shell .focus-ring:focus-visible {
+  outline-color: #237bb6;
+}
+
+.patient-dashboard-shell button,
+.patient-dashboard-shell a {
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.patient-dashboard-shell button:not(:disabled):active,
+.patient-dashboard-shell a:active {
+  transform: translateY(1px);
+}
+
+.patient-dashboard-shell .hover\:bg-clinical-primaryDark:hover {
+  background-color: #176391;
+}
+
+.patient-doctors-page .doctor-directory-card {
+  box-shadow: 0 5px 18px rgba(11, 53, 85, 0.045);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.patient-doctors-page .doctor-directory-card:hover {
+  border-color: #b9d7e9;
+  box-shadow: 0 9px 24px rgba(11, 53, 85, 0.08);
+}
+
+.patient-doctors-page .doctor-directory-card:focus-within {
+  border-color: #8ec4e3;
+}
+
+.patient-dashboard-shell .message-bubble-outgoing {
+  border-color: #b9d7e9;
+  background-color: #e1f0fa;
+}
+
+.patient-dashboard-shell .message-attachment:hover {
+  border-color: #b9d7e9;
+  background-color: #e1f0fa;
+  color: #176391;
+}
+
+.patient-dashboard-content {
+  container: patient-page / inline-size;
+}
+
+.patient-log-region {
+  display: grid;
+  align-items: start;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.patient-log-items {
+  display: contents;
+}
+
+.patient-log-food,
+.patient-log-bolus {
+  container-type: inline-size;
+}
+
+.patient-log-food {
+  order: 1;
+}
+
+.patient-log-bolus {
+  order: 2;
+}
+
+.patient-log-recommendation {
+  order: 3;
+  min-width: 0;
+}
+
+.patient-log-monitoring {
+  order: 4;
+  min-width: 0;
+}
+
+@container patient-page (min-width: 52rem) {
+  .patient-log-region {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
   }
-  to {
-    transform: translateX(-180px);
+
+  .patient-log-food {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .patient-log-bolus {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .patient-log-recommendation,
+  .patient-log-monitoring {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 24rem) {
+  .patient-food-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.42fr);
+  }
+}
+
+@container (min-width: 19rem) {
+  .patient-bolus-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-wave::before,
-  .landing-wave::after {
-    animation: none;
+  .patient-dashboard-shell *,
+  .patient-dashboard-shell *::before,
+  .patient-dashboard-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

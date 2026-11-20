@@ -1,135 +1,156 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { Activity, Apple, Bot, Droplets, MessageSquare, Plus, Send, Syringe, TrendingUp } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Activity, Apple, Plus, Syringe, TrendingUp } from 'lucide-react';
 import { cgmReadings, digitalTwinForecast, forecastSnapshots } from '../data/cgm';
 import { CGMChart } from '../components/charts/CGMChart';
 import { DigitalTwinChart } from '../components/charts/DigitalTwinChart';
+import { BolusSuggestionCard } from '../components/clinical/BolusSuggestionCard';
 import { GlucoseValue } from '../components/clinical/GlucoseValue';
 import { TrendIndicator } from '../components/clinical/TrendIndicator';
 import { MetricCard } from '../components/ui/MetricCard';
 import { PageHeader } from '../components/ui/PageHeader';
-import type { BolusEntry, FoodEntry, Message, Patient, PatientProfile } from '../types';
-import type { GlucoseEntry } from '../utils/sync';
+import type { BolusEntry, FoodEntry, Patient } from '../types';
 import { updateMeal } from '../utils/sync';
+
+const timestampValue = (instant?: string | null) => {
+  if (!instant) return null;
+  const value = Date.parse(instant);
+  return Number.isNaN(value) ? null : value;
+};
+
+export const formatLocalDateTime = (instant?: string | null) => {
+  const value = timestampValue(instant);
+  if (value === null) return 'Date unavailable';
+  const date = new Date(value);
+  const day = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${day} · ${time}`;
+};
+
+const foodInstant = (entry: FoodEntry) => entry.status === 'eaten' ? entry.actualEatingAt : entry.plannedEatingAt;
+
+const foodDateLabel = (entry: FoodEntry) => {
+  const label = entry.status === 'eaten' ? 'Eaten' : 'Planned';
+  return `${label}: ${formatLocalDateTime(foodInstant(entry))}`;
+};
+
+const descendingTimestamp = (left?: string | null, right?: string | null) => {
+  const leftValue = timestampValue(left);
+  const rightValue = timestampValue(right);
+  if (leftValue === null) return rightValue === null ? 0 : 1;
+  if (rightValue === null) return -1;
+  return rightValue - leftValue;
+};
+
+const bolusDateTime = (entry: BolusEntry) => formatLocalDateTime(entry.administeredAt);
+
+const recordedUnits = (entry: BolusEntry) => {
+  if (entry.administeredUnits !== undefined) return `${entry.administeredUnits} U`;
+  return entry.recorded;
+};
+
+const validCarbs = (value: string) => {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const displayCarbs = (entry: FoodEntry) => {
+  if (entry.announcedCarbsG !== undefined && entry.announcedCarbsG !== null) return `${entry.announcedCarbsG}g`;
+  return entry.carbs || 'Not provided';
+};
+
+const currentLocalTime = (instant: string) => {
+  const date = new Date(instant);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
 
 export function PatientDashboard({
   focusFood = false,
   patient,
   doctorName,
   assignmentStatus,
-  setMessages,
   foodEntries,
   setFoodEntries,
   bolusEntries,
   setBolusEntries,
-  glucoseEntries,
-  setGlucoseEntries,
-  patientProfile,
 }: {
   focusFood?: boolean;
   patient: Patient;
   doctorName: string;
   assignmentStatus: 'pending' | 'accepted' | 'declined';
-  setMessages: Dispatch<SetStateAction<Message[]>>;
   foodEntries: FoodEntry[];
   setFoodEntries: Dispatch<SetStateAction<FoodEntry[]>>;
   bolusEntries: BolusEntry[];
   setBolusEntries: Dispatch<SetStateAction<BolusEntry[]>>;
-  glucoseEntries: GlucoseEntry[];
-  setGlucoseEntries: Dispatch<SetStateAction<GlucoseEntry[]>>;
-  patientProfile: PatientProfile;
 }) {
-  const patientFood = foodEntries.filter((entry) => entry.patientSlug === patient.slug);
-  const patientBolus = bolusEntries.filter((entry) => entry.patientSlug === patient.slug);
-  const patientGlucose = glucoseEntries.filter((entry) => entry.patientSlug === patient.slug).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
-  const [draft, setDraft] = useState('');
-  const [botReply, setBotReply] = useState(`Ask a question here. Your message will also be sent to ${doctorName}.`);
-  const [mealForm, setMealForm] = useState({ meal: 'Lunch', items: '', carbs: '', glucose: '', status: 'planned' as 'planned' | 'eaten' });
-  const [bolusForm, setBolusForm] = useState({ meal: 'Lunch', carbs: '', recorded: '' });
+  const patientFood = foodEntries
+    .filter((entry) => entry.patientSlug === patient.slug)
+    .sort((left, right) => descendingTimestamp(foodInstant(left), foodInstant(right)));
+  const patientBolus = bolusEntries
+    .filter((entry) => entry.patientSlug === patient.slug)
+    .sort((left, right) => descendingTimestamp(left.administeredAt, right.administeredAt));
+  const [mealForm, setMealForm] = useState({ meal: 'Lunch', items: '', carbs: '' });
+  const [foodError, setFoodError] = useState('');
+  const [bolusUnits, setBolusUnits] = useState('');
   const [bolusError, setBolusError] = useState('');
-  const [glucoseValue, setGlucoseValue] = useState('');
-
-  const sendToDoctor = () => {
-    if (!draft.trim() || assignmentStatus !== 'accepted') return;
-    const text = draft.trim();
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        doctorId: patientProfile.selectedDoctorId,
-        patientSlug: patient.slug,
-        patient: patient.name,
-        avatar: patient.avatar,
-        from: 'patient',
-        text,
-        time: 'Now',
-        unread: true,
-        sentAt: new Date().toISOString(), syncState: 'pending', syncAttempts: 0,
-      },
-    ]);
-    setBotReply(`Your message was recorded for ${doctorName}.`);
-    setDraft('');
-  };
-
-  const currentTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const addFood = () => {
-    if (!mealForm.items.trim() || !mealForm.carbs.trim()) return;
+    const carbs = validCarbs(mealForm.carbs);
+    if (!mealForm.items.trim()) {
+      setFoodError('Enter the food items.');
+      return;
+    }
+    if (carbs === null) {
+      setFoodError('Carbohydrates must be a finite, non-negative number.');
+      return;
+    }
     const eventAt = new Date().toISOString();
     setFoodEntries((current) => [
       {
         id: crypto.randomUUID(),
         patientSlug: patient.slug,
         patient: patient.name,
-        time: currentTime(),
+        time: currentLocalTime(eventAt),
         meal: mealForm.meal,
         items: mealForm.items.trim(),
-        carbs: `${mealForm.carbs.trim()}g`,
-        impact: mealForm.glucose.trim() ? `${mealForm.glucose.trim()} mg/dL noted` : 'Pending CGM impact',
-        status: mealForm.status,
+        carbs: `${carbs}g`,
+        impact: 'Pending CGM impact',
+        status: 'eaten',
         plannedEatingAt: eventAt,
-        actualEatingAt: mealForm.status === 'eaten' ? eventAt : null,
-        announcedCarbsG: Number(mealForm.carbs),
-        consumedCarbsG: mealForm.status === 'eaten' ? Number(mealForm.carbs) : null,
-        ...(mealForm.status === 'eaten' ? { confirmAnnouncedAmount: true } : {}),
+        actualEatingAt: eventAt,
+        announcedCarbsG: carbs,
+        consumedCarbsG: carbs,
+        confirmAnnouncedAmount: true,
         syncState: 'pending', syncAttempts: 0,
       },
       ...current,
     ]);
-    setMealForm({ meal: 'Lunch', items: '', carbs: '', glucose: '', status: 'planned' });
+    setMealForm({ meal: 'Lunch', items: '', carbs: '' });
+    setFoodError('');
   };
 
   const addBolus = () => {
-    const units = Number(bolusForm.recorded);
-    const carbsText = bolusForm.carbs.trim();
-    const carbsG = carbsText === '' ? null : Number(carbsText);
-    if (!bolusForm.recorded.trim() || !Number.isFinite(units) || units < 0) {
+    const units = Number(bolusUnits);
+    if (!bolusUnits.trim() || !Number.isFinite(units) || units < 0) {
       setBolusError('Enter a finite, non-negative insulin dose.');
       return;
     }
-    if (carbsG !== null && (!Number.isFinite(carbsG) || carbsG < 0)) {
-      setBolusError('Carbs must be a finite, non-negative number or left blank.');
-      return;
-    }
+    const administeredAt = new Date().toISOString();
     setBolusEntries((current) => [
       {
         id: crypto.randomUUID(),
         patientSlug: patient.slug,
         patient: patient.name,
-        time: currentTime(),
-        meal: bolusForm.meal,
-        carbs: carbsG === null ? 'Not provided' : `${carbsG}g`,
-        carbsG,
-        recommended: 'Doctor review',
+        time: currentLocalTime(administeredAt),
         administeredUnits: units,
         recorded: `${units} U`,
-        administeredAt: new Date().toISOString(),
+        administeredAt,
         syncState: 'pending', syncAttempts: 0,
       },
       ...current,
     ]);
-    setBolusForm({ meal: 'Lunch', carbs: '', recorded: '' });
+    setBolusUnits('');
     setBolusError('');
   };
 
@@ -144,35 +165,24 @@ export function PatientDashboard({
     setFoodEntries((current) => current.map((item) => item.id === entry.id ? result.meal : item));
   };
 
-  const addGlucose = () => {
-    const value = Number(glucoseValue);
-    if (!Number.isFinite(value) || value < 20 || value > 600) return;
-    const now = new Date();
-    setGlucoseEntries((current) => [{ id: crypto.randomUUID(), patientSlug: patient.slug, value, time: currentTime(), recordedAt: now.toISOString(), syncState: 'pending', syncAttempts: 0 }, ...current]);
-    setGlucoseValue('');
-  };
-
   return (
-    <>
-      <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and care-team messages in one place.' : 'Your manual readings, food, insulin, and care-team messages in one place.'} />
-      {patient.slug === 'omar-hassan' ? <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo patient: sample CGM readings, forecasts, and historical logs. This is not a live sensor feed.</div> : null}
-      {assignmentStatus !== 'accepted' ? <div className="surface mb-6 p-4 text-sm"><strong>Doctor request {assignmentStatus}</strong><p className="mt-1 text-clinical-muted">{doctorName} will appear here after accepting your request. You can still record food and insulin.</p></div> : null}
-      <section className="surface mb-6 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-lg font-semibold"><Droplets size={20} /> Manual glucose readings</h2><span className="text-xs text-clinical-muted">Shared with your assigned doctor</span></div>
-        <div className="mt-4 flex flex-wrap gap-2"><input aria-label="Glucose reading in mg/dL" type="number" min="20" max="600" value={glucoseValue} onChange={(event) => setGlucoseValue(event.target.value)} placeholder="mg/dL" className="focus-ring w-40 rounded-md border border-clinical-border px-3 py-2" /><button onClick={addGlucose} className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white"><Plus size={16} /> Record</button></div>
-        {patientGlucose.length ? <div className="mt-4 flex flex-wrap gap-2">{patientGlucose.slice(0, 6).map((entry) => <div key={entry.id} className="rounded-md border border-clinical-border px-3 py-2 text-sm"><strong>{entry.value} mg/dL</strong><span className="ml-2 text-clinical-muted">{entry.time}</span></div>)}</div> : <p className="mt-3 text-sm text-clinical-muted">No manual readings yet.</p>}
-      </section>
-      {patient.usesCgm ? (
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
-        <MetricCard label="Trend" value={patient.trend} sub="Latest CGM direction" />
-        <MetricCard label="Time in Range" value={`${patient.timeInRange}%`} sub="Today" />
-        <MetricCard label="Last CGM Reading" value={patient.lastReading} sub="Sample sensor data" />
-      </div>
-      ) : <section className="surface p-5"><h2 className="font-semibold">No CGM connected yet</h2><p className="mt-1 text-sm text-clinical-muted">Glucose charts and forecasts will appear when CGM data is available.</p></section>}
+    <div className="patient-dashboard-content">
+      {!focusFood ? <>
+        <PageHeader title={`Welcome, ${patient.name}`} subtitle={patient.usesCgm ? 'Your glucose, forecast, food, and insulin records in one place.' : 'Your food and insulin records in one place.'} />
+        {patient.slug === 'omar-hassan' ? <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo patient: sample CGM readings, forecasts, and historical logs. This is not a live sensor feed.</div> : null}
+        {assignmentStatus !== 'accepted' ? <div className="surface mb-6 p-4 text-sm"><strong>Doctor request {assignmentStatus}</strong><p className="mt-1 text-clinical-muted">{doctorName} will appear here after accepting your request. You can still record food and insulin.</p></div> : null}
+        {patient.usesCgm ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard blue label="Current Glucose" value={`${patient.currentGlucose} mg/dL`} sub={patient.status} />
+          <MetricCard blue label="Trend" value={patient.trend} sub="Latest CGM direction" />
+          <MetricCard blue label="Time in Range" value={`${patient.timeInRange}%`} sub="Today" />
+          <MetricCard blue label="Last CGM Reading" value={patient.lastReading} sub="Sample sensor data" />
+        </div>
+        ) : <section className="surface p-5"><h2 className="font-semibold">No CGM connected yet</h2><p className="mt-1 text-sm text-clinical-muted">Glucose charts and forecasts will appear when CGM data is available.</p></section>}
+      </> : null}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[340px_1fr]">
-        <aside className={`surface p-5 ${focusFood ? 'ring-2 ring-clinical-primary' : ''}`}>
+      <div className={focusFood ? 'patient-log-region mt-6' : 'mt-6 grid gap-6 xl:grid-cols-[340px_1fr]'}>
+        <aside className={`patient-log-food surface min-w-0 p-5 ${focusFood ? 'ring-2 ring-clinical-primary' : ''}`}>
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Apple size={20} /> Food</h2>
             <span className="rounded-md bg-clinical-secondary px-2 py-1 text-xs font-semibold text-clinical-primaryDark">Shared with assigned doctor</span>
@@ -182,25 +192,24 @@ export function PatientDashboard({
               <select value={mealForm.meal} onChange={(event) => setMealForm({ ...mealForm, meal: event.target.value })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm">
                 <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
               </select>
-              <input value={mealForm.items} onChange={(event) => setMealForm({ ...mealForm, items: event.target.value })} placeholder="Food items" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
-              <select value={mealForm.status} onChange={(event) => setMealForm({ ...mealForm, status: event.target.value as 'planned' | 'eaten' })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm"><option value="planned">Plan for later</option><option value="eaten">Already eaten</option></select>
-              <div className="grid grid-cols-2 gap-2">
-                <input value={mealForm.carbs} onChange={(event) => setMealForm({ ...mealForm, carbs: event.target.value })} inputMode="numeric" placeholder="Carbs g" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
-                <input value={mealForm.glucose} onChange={(event) => setMealForm({ ...mealForm, glucose: event.target.value })} inputMode="numeric" placeholder="Glucose" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
+              <div className="patient-food-fields grid min-w-0 gap-2">
+                <input value={mealForm.items} onChange={(event) => setMealForm({ ...mealForm, items: event.target.value })} placeholder="Food items" className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm" />
+                <input aria-label="Carbohydrates in grams" value={mealForm.carbs} onChange={(event) => setMealForm({ ...mealForm, carbs: event.target.value })} inputMode="decimal" placeholder="Carbs g" className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm" />
               </div>
               <button onClick={addFood} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-primaryDark"><Plus size={16} /> Add food</button>
             </div>
+            {foodError ? <p role="alert" className="mt-2 text-sm text-red-700">{foodError}</p> : null}
           </div>
           <div className="mt-4 space-y-3">
             {patientFood.map((entry) => (
               <article key={entry.id} className="rounded-lg border border-clinical-border p-3">
                 <div className="flex items-center justify-between gap-3">
                   <strong>{entry.meal}</strong>
-                  <span className="text-xs text-clinical-muted">{entry.time}</span>
+                  <span className="text-right text-xs text-clinical-muted">{foodDateLabel(entry)}</span>
                 </div>
                 <p className="mt-1 text-sm text-clinical-muted">{entry.items}</p>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
-                  <span className="rounded-md bg-clinical-secondary px-2 py-1">{entry.carbs} carbs</span>
+                  <span className="rounded-md bg-clinical-secondary px-2 py-1">{displayCarbs(entry)} carbs</span>
                   <span className="rounded-md bg-amber-50 px-2 py-1 text-clinical-warning">{entry.impact}</span>
                   <span className="rounded-md bg-emerald-50 px-2 py-1 text-clinical-success">{entry.status}</span>
                 </div>
@@ -210,35 +219,25 @@ export function PatientDashboard({
           </div>
         </aside>
 
-        <section className="space-y-6">
-          <section className="surface p-5">
+        <div className={focusFood ? 'patient-log-items' : 'space-y-6'}>
+          {!focusFood ? <div className="patient-log-recommendation"><BolusSuggestionCard /></div> : null}
+          <section className="patient-log-bolus surface min-w-0 overflow-hidden p-5">
             <h2 className="flex items-center gap-2 text-xl font-semibold"><Syringe size={20} /> Manual bolus log</h2>
-            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
-              <select value={bolusForm.meal} onChange={(event) => setBolusForm({ ...bolusForm, meal: event.target.value })} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm">
-                <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
-              </select>
-              <input aria-label="Carbs (g, optional)" value={bolusForm.carbs} onChange={(event) => setBolusForm({ ...bolusForm, carbs: event.target.value })} inputMode="decimal" placeholder="Carbs (g, optional)" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
-              <input value={bolusForm.recorded} onChange={(event) => setBolusForm({ ...bolusForm, recorded: event.target.value })} inputMode="decimal" placeholder="Bolus units" className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm" />
+            <div className="patient-bolus-controls mt-4 grid min-w-0 gap-3">
+              <input aria-label="Bolus units" value={bolusUnits} onChange={(event) => setBolusUnits(event.target.value)} inputMode="decimal" placeholder="Bolus units" className="focus-ring min-w-0 rounded-md border border-clinical-border px-3 py-2 text-sm" />
               <button onClick={addBolus} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2 text-sm font-semibold text-white hover:bg-clinical-primaryDark"><Plus size={16} /> Log</button>
             </div>
             {bolusError ? <p role="alert" className="mt-2 text-sm text-red-700">{bolusError}</p> : null}
             <div className="mt-4 divide-y divide-clinical-border rounded-lg border border-clinical-border">
               {patientBolus.slice(0, 3).map((entry) => (
-                <div className="grid gap-2 p-3 text-sm md:grid-cols-4" key={entry.id}><strong>{entry.time}</strong><span>{entry.meal}</span><span>Carbs: {entry.carbs || 'Not provided'}</span><span>Recorded: {entry.recorded}</span></div>
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 p-3 text-sm" key={entry.id}>
+                  <strong>{recordedUnits(entry)}</strong>
+                  <span className="text-clinical-muted">{bolusDateTime(entry)}</span>
+                </div>
               ))}
             </div>
           </section>
-          <section className="surface p-5">
-            <h2 className="text-xl font-semibold">My medical info</h2>
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Age</dt><dd className="font-semibold">{patientProfile.age}</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Weight</dt><dd className="font-semibold">{patientProfile.weight} kg</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Height</dt><dd className="font-semibold">{patientProfile.height} cm</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Type</dt><dd className="font-semibold">{patientProfile.diabetesType || 'Not provided'}</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-clinical-muted">Insulin</dt><dd className="font-semibold">{patientProfile.insulinPlan}</dd></div>
-            </dl>
-          </section>
-          {patient.usesCgm ? <section className="surface p-5">
+          {!focusFood && patient.usesCgm ? <section className="patient-log-monitoring surface min-w-0 overflow-hidden p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xl font-semibold"><TrendingUp size={20} /> Predicted Glucose</h2>
               <span className="text-sm font-semibold text-clinical-muted">Simulated digital twin</span>
@@ -254,45 +253,19 @@ export function PatientDashboard({
               ))}
             </div>
           </section> : null}
-          {patient.usesCgm ? <section className="surface p-5">
+          {!focusFood && patient.usesCgm ? <section className="patient-log-monitoring surface p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xl font-semibold"><Activity size={20} /> CGM Graph</h2>
               <div className="text-sm"><GlucoseValue value={patient.currentGlucose} /> <span className="ml-2"><TrendIndicator trend={patient.trend} /></span></div>
             </div>
-            <CGMChart data={cgmReadings} />
+            <CGMChart blue data={cgmReadings} />
           </section> : null}
-          {patient.usesCgm ? <section className="surface p-5">
+          {!focusFood && patient.usesCgm ? <section className="patient-log-monitoring surface min-w-0 overflow-hidden p-5">
             <h2 className="text-xl font-semibold">Digital Twin Forecast Graph</h2>
-            <DigitalTwinChart data={digitalTwinForecast} />
+            <DigitalTwinChart blue data={digitalTwinForecast} />
           </section> : null}
-          <section className="surface p-5">
-            <div className="flex items-center gap-2">
-              <Bot className="text-clinical-primary" size={20} />
-              <h2 className="text-xl font-semibold">Care-team messages</h2>
-            </div>
-            <p className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm text-clinical-primaryDark">{assignmentStatus === 'accepted' ? botReply : 'Messaging opens after your doctor accepts your request.'}</p>
-            {assignmentStatus === 'accepted' ? <>
-            <label className="mt-4 block text-sm font-semibold" htmlFor="patient-chat">Message or question</label>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <input
-                id="patient-chat"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && sendToDoctor()}
-                placeholder="Example: My glucose is rising after lunch. What should I do?"
-                className="focus-ring min-w-0 flex-1 rounded-md border border-clinical-border px-3 py-2"
-              />
-              <button onClick={sendToDoctor} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white hover:bg-clinical-primaryDark">
-                <Send size={18} /> Send to doctor
-              </button>
-            </div>
-            <Link to="/messages" className="focus-ring mt-4 inline-flex items-center gap-2 rounded-md border border-clinical-border px-4 py-2 font-semibold text-clinical-primary hover:bg-clinical-secondary">
-              <MessageSquare size={18} /> Open full messages
-            </Link>
-            </> : null}
-          </section>
-        </section>
+        </div>
       </div>
-    </>
+    </div>
   );
 }

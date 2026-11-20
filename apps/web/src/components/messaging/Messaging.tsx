@@ -16,7 +16,7 @@ export function ConversationList({ messages, selected, onSelect }: { messages: M
       </div>
       <div className="min-h-0 overflow-x-hidden overflow-y-auto divide-y divide-clinical-border">
         {conversations.map((message) => (
-          <button key={message.patientSlug} onClick={() => onSelect(message.patientSlug)} className={`focus-ring flex w-full gap-3 p-4 text-left hover:bg-emerald-50 ${selected === message.patientSlug ? 'bg-emerald-50' : ''}`}>
+          <button key={message.patientSlug} onClick={() => onSelect(message.patientSlug)} className={`focus-ring flex w-full gap-3 p-4 text-left hover:bg-clinical-secondary ${selected === message.patientSlug ? 'bg-clinical-secondary' : ''}`}>
             <Avatar label={message.avatar} />
             <span className="min-w-0 flex-1">
               <span className="flex items-center justify-between gap-2">
@@ -25,7 +25,7 @@ export function ConversationList({ messages, selected, onSelect }: { messages: M
               </span>
               <span className="mt-1 line-clamp-2 text-xs text-clinical-muted">{message.text}</span>
             </span>
-            {message.unread ? <span className="mt-1 h-2 w-2 rounded-full bg-clinical-primary" aria-label="Unread conversation" /> : null}
+            {message.unread && message.from === 'patient' ? <span className="mt-1 h-2 w-2 rounded-full bg-clinical-primary" aria-label="Unread conversation" /> : null}
           </button>
         ))}
       </div>
@@ -75,7 +75,7 @@ export function MessageThread({ patient, doctorName, messages, draft, setDraft, 
       }} className="min-h-0 min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain bg-clinical-bg p-4">
         {ordered.map((message) => (
           <div key={message.id} className={`flex min-w-0 ${message.from === viewerRole ? 'justify-end' : 'justify-start'}`}>
-            <div className={`min-w-0 max-w-[85%] rounded-lg border px-4 py-3 text-sm shadow-clinical sm:max-w-[78%] ${message.from === viewerRole ? 'border-emerald-200 bg-emerald-50' : 'border-clinical-border bg-white'}`}>
+            <div className={`message-bubble min-w-0 max-w-[85%] rounded-lg border px-4 py-3 text-sm shadow-clinical sm:max-w-[78%] ${message.from === viewerRole ? 'message-bubble-outgoing border-clinical-border bg-clinical-secondary text-clinical-text' : 'message-bubble-incoming border-clinical-border bg-white'}`}>
               <p className="break-words [overflow-wrap:anywhere]">{message.text}</p>
               <p className="mt-2 text-xs text-clinical-muted">{message.time}</p>
             </div>
@@ -85,7 +85,7 @@ export function MessageThread({ patient, doctorName, messages, draft, setDraft, 
       <div className="min-w-0 shrink-0 border-t border-clinical-border p-4">
         <label className="sr-only" htmlFor="message-input">Type a message</label>
         <div className="flex min-w-0 gap-2">
-          <button className="focus-ring shrink-0 rounded-md border border-clinical-border p-3 text-clinical-muted" aria-label="Attach file"><Paperclip size={18} /></button>
+          <button className="message-attachment focus-ring shrink-0 rounded-md border border-clinical-border p-3 text-clinical-muted" aria-label="Attach file"><Paperclip size={18} /></button>
           <input id="message-input" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSend()} placeholder="Type a message..." className="focus-ring min-w-0 flex-1 rounded-md border border-clinical-border px-3 py-2" />
           <button onClick={onSend} className="focus-ring inline-flex shrink-0 items-center gap-2 rounded-md bg-clinical-primary px-3 py-2 font-semibold text-white hover:bg-clinical-primaryDark sm:px-4"><Send size={17} /><span className="hidden sm:inline">Send</span></button>
         </div>

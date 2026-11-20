@@ -23,7 +23,7 @@ export function PatientTable({ patients, compact = false, showDiabetesType = tru
         </thead>
         <tbody className="divide-y divide-clinical-border bg-white">
           {patients.map((patient) => (
-            <tr key={patient.id} className="hover:bg-emerald-50">
+            <tr key={patient.id} className="hover:bg-clinical-secondary">
               <td className="px-4 py-3 font-semibold text-clinical-text">
                 <Link className="focus-ring rounded-sm hover:text-clinical-primary" to={`/patients/${patient.slug}`}>{patient.name}</Link>
               </td>

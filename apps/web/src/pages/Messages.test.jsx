@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React from 'react';
+import React, { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, test } from 'vitest';
@@ -11,6 +11,14 @@ const row = (id, text, sentAt) => ({ id, doctorId: 'd1', patientSlug: 'p1', pati
 
 afterEach(cleanup);
 
+function SendHarness({ role }) {
+  const [messages, setMessages] = useState([]);
+  return <MemoryRouter initialEntries={['/messages?patient=p1']}>
+    <Messages role={role} doctorId="d1" currentPatient={role === 'patient' ? patient : undefined} doctorName="Dr. Test Doctor" patientRecords={[patient]} messages={messages} setMessages={setMessages} acceptedPatientSlugs={['p1']} assignmentStatus="accepted" />
+    <output data-testid="sent-messages">{JSON.stringify(messages)}</output>
+  </MemoryRouter>;
+}
+
 test('conversation renders oldest to newest with deterministic timestamp ties', () => {
   render(<MemoryRouter initialEntries={['/messages?patient=p1']}><Messages role="patient" doctorId="d1" currentPatient={patient} doctorName="Doctor" patientRecords={[patient]} messages={[
     row('z', 'Newest', '2026-11-09T23:24:00Z'),
@@ -20,6 +28,10 @@ test('conversation renders oldest to newest with deterministic timestamp ties', 
   const text = screen.getByTestId('message-scroll').textContent;
   expect(text.indexOf('Tie A')).toBeLessThan(text.indexOf('Tie B'));
   expect(text.indexOf('Tie B')).toBeLessThan(text.indexOf('Newest'));
+  expect(document.querySelector('.patient-messages-page')).toBeTruthy();
+  expect(screen.getByText('Tie A').closest('.message-bubble').classList.contains('message-bubble-outgoing')).toBe(true);
+  expect(screen.getByText('Tie B').closest('.message-bubble').classList.contains('message-bubble-incoming')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Attach file' })).toBeTruthy();
 });
 
 test('thread follows initial, switched, outgoing, and near-bottom messages but preserves an older reading position', () => {
@@ -62,4 +74,18 @@ test('thread follows initial, switched, outgoing, and near-bottom messages but p
   const otherPatient = { ...patient, id: 'p2', slug: 'p2', name: 'Other Patient' };
   rerender(<MemoryRouter><MessageThread {...props} patient={otherPatient} messages={[row('other', 'Other conversation', '2026-11-09T23:24:00Z')]} /></MemoryRouter>);
   expect(scroller.scrollTop).toBe(700);
+});
+
+test.each([
+  ['patient', 'doctor'],
+  ['doctor', 'patient'],
+])('%s messages create an unread item for the receiving %s', (role, recipient) => {
+  render(<SendHarness role={role} />);
+  fireEvent.change(screen.getByLabelText('Type a message'), { target: { value: `From ${role}` } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+  const [message] = JSON.parse(screen.getByTestId('sent-messages').textContent);
+  expect(message.from).toBe(role);
+  expect(message.unread).toBe(true);
+  expect(message.unreadFor).toBe(recipient);
 });

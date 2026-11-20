@@ -62,8 +62,8 @@ export interface LoginRequest {
   role: Account['role'];
 }
 
-export interface PatientRegistrationRequest {
-  account: Account & { role: 'patient' };
+export interface RegistrationRequest {
+  account: Account;
   password: string;
 }
 
@@ -114,6 +114,7 @@ export interface Message {
   text: string;
   time: string;
   unread?: boolean;
+  unreadFor?: 'patient' | 'doctor';
   sentAt?: string;
   syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
   syncAttempts?: number;
@@ -149,12 +150,16 @@ export interface BolusEntry {
   patientSlug: string;
   patient: string;
   time: string;
-  meal: string;
-  carbs: string;
+  /** Historical meal context. New manual bolus logs do not collect it. */
+  meal?: string;
+  /** Historical carbohydrate context. New manual bolus logs do not collect it. */
+  carbs?: string;
   carbsG?: number | null;
+  /** Optional contextual link. Carbohydrate totals remain sourced from the meal record. */
+  mealId?: string | null;
   /** Historical compatibility context. New insulin logs do not collect this. */
   preMeal?: string;
-  recommended: string;
+  recommended?: string;
   recorded: string;
   administeredUnits?: number;
   administeredAt?: string;
@@ -166,10 +171,13 @@ export interface BolusEntry {
 
 export interface NotificationItem {
   id: string;
+  recipientRole: 'patient' | 'doctor' | 'all';
+  recipientId?: string;
   patientSlug?: string;
   doctorId?: string;
+  messageId?: string;
   group: 'Today' | 'Yesterday' | 'Earlier';
-  type: 'Critical glucose' | 'Patient message' | 'Digital twin alert' | 'Patient assigned' | 'System notice';
+  type: 'Critical glucose' | 'Patient message' | 'Doctor message' | 'Digital twin alert' | 'Patient assigned' | 'System notice';
   title: string;
   body: string;
   time: string;

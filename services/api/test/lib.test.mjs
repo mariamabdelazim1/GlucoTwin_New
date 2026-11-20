@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { finiteNonnegative, optionalNumber, strictUnit, timestamp, withoutLocalSyncMetadata } from '../lib.mjs';
+import { finiteNonnegative, optionalNumber, strictUnit, timestamp, validateDoctorRegistration, withoutLocalSyncMetadata } from '../lib.mjs';
 
 test('strict numeric validation distinguishes missing, zero, and invalid input', () => {
   assert.equal(optionalNumber(undefined), null);
@@ -36,4 +36,11 @@ test('local synchronization metadata is removed without changing clinical proven
     confirmationProvenance: { source: 'patient_log' },
   });
   assert.equal(input.syncState, 'pending');
+});
+
+test('doctor registration requires the existing professional profile fields', () => {
+  const account = { doctorProfile: { fullName: 'Dr. Test', specialty: 'Endocrinology', yearsExperience: '7', medicalSchool: 'Cairo University' } };
+  assert.doesNotThrow(() => validateDoctorRegistration(account));
+  assert.throws(() => validateDoctorRegistration({ doctorProfile: { ...account.doctorProfile, specialty: '' } }), /Specialty is required/);
+  assert.throws(() => validateDoctorRegistration({ doctorProfile: { ...account.doctorProfile, yearsExperience: '71' } }), /between 0 and 70/);
 });

@@ -70,6 +70,7 @@ Medical events:
 
 - `glucose_readings` in mg/dL
 - `insulin_doses` in units with nullable `carbs_g`; these are actual administrations, never hypothetical scenarios
+- `insulin_doses.meal_id` is an optional contextual link to a same-patient meal. When it is set, `carbs_g` is null and carbohydrate totals come only from the linked `meals` row. Snapshots expose the link as `mealId`; consumers must never materialize the linked meal's carbohydrates as a second carbohydrate event. The API currently does not assemble prediction-model input from these tables, so any future adapter must preserve this single-source rule.
 - `basal_schedule_entries` in U/hour with prescribed-versus-confirmed kind and overlap prevention
 - `meals`, separating announced carbohydrates from nullable confirmed consumption
 
@@ -180,7 +181,7 @@ status fields.
 
 Existing `/api` response shapes are retained for the React and Flutter clients. Snapshots additionally return normalized meal status, planned/actual times, announced/consumed carbohydrates, and version; normalized columns override stale values in `legacy_payload`.
 
-The existing admin screens still use frontend/demo state. This migration does not create an admin role, an admin provisioning API, or broad administrative access. New doctor accounts cannot be self-registered through `/api/auth/bridge`; they must be explicitly provisioned in a controlled process.
+The existing admin screens still use frontend/demo state. This migration does not create an admin role or broad administrative access. Patient and doctor registration use `/api/auth/bridge`; new doctor registrations must include the required professional profile fields and are validated before the account and profile are created transactionally.
 
 Client-provided IDs keep identical creates idempotent, while a conflicting create returns HTTP 409. Meal edits use optimistic versions and retry-safe mutation IDs; broader durable offline conflict resolution is not claimed.
 

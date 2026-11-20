@@ -1,12 +1,25 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'core/constants/app_colors.dart';
 import 'data/sync_api.dart';
+import 'presentation/widgets/bolus_recommendation_card.dart';
+import 'presentation/widgets/portal_message_bubble.dart';
 
-const green = Color(0xFF047857);
-const darkGreen = Color(0xFF064E3B);
-const background = Color(0xFFF4F8F5);
-const muted = Color(0xFF667085);
+const green = AppColors.portalBlue;
+const darkGreen = AppColors.portalNavy;
+const background = AppColors.portalBackground;
+const muted = AppColors.portalMuted;
+const dashboardCyan = Color(0xFF22B8D6);
+const dashboardIce = AppColors.portalIceBlue;
+const dashboardBorder = AppColors.portalBorder;
+const authNavy = Color(0xFF072E50);
+const authNavyDeep = Color(0xFF061F39);
+const authBlue = Color(0xFF237BB6);
+const authBlueDark = Color(0xFF175F91);
+const authIce = Color(0xFFE1F0FA);
+const authIceText = Color(0xFFD3E7F4);
+const authBorder = Color(0xFFD7E8F3);
 
 double doctorRank(Map<String, dynamic> doctor) {
   final rating = doctor['rating'] as Map<String, dynamic>? ?? {};
@@ -45,11 +58,105 @@ List<Map<String, dynamic>> chronologicalConversationMessages(dynamic rows) {
   return messages;
 }
 
-String insulinCarbsLabel(Map<String, dynamic> item) {
-  final canonical = item['carbsG'];
-  if (canonical is num) return '${canonical}g';
-  final legacy = '${item['carbs'] ?? ''}'.trim();
-  return legacy.isEmpty || legacy == 'Not provided' ? 'Not provided' : legacy;
+DateTime? clinicalTimestamp(dynamic value) {
+  if (value is! String || value.trim().isEmpty) return null;
+  return DateTime.tryParse(value)?.toLocal();
+}
+
+String formatClinicalDateTime(dynamic value) {
+  final date = clinicalTimestamp(value);
+  if (date == null) return 'Date unavailable';
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
+  final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+  final minute = date.minute.toString().padLeft(2, '0');
+  final period = date.hour < 12 ? 'AM' : 'PM';
+  return '${date.day} ${months[date.month - 1]} ${date.year} · $hour:$minute $period';
+}
+
+dynamic foodHistoryTimestamp(Map<String, dynamic> item) =>
+    item['status'] == 'eaten'
+        ? item['actualEatingAt']
+        : item['plannedEatingAt'];
+
+String foodHistoryDateLabel(Map<String, dynamic> item) {
+  final label = item['status'] == 'eaten' ? 'Eaten' : 'Planned';
+  return '$label: ${formatClinicalDateTime(foodHistoryTimestamp(item))}';
+}
+
+String bolusUnitsLabel(Map<String, dynamic> item) {
+  final units = item['administeredUnits'];
+  if (units is num) return '$units U';
+  final recorded = '${item['recorded'] ?? ''}'.trim();
+  return recorded.isEmpty ? 'Units unavailable' : recorded;
+}
+
+int compareClinicalHistory(Map<String, dynamic> left,
+    Map<String, dynamic> right, dynamic Function(Map<String, dynamic>) value) {
+  final leftTime = clinicalTimestamp(value(left));
+  final rightTime = clinicalTimestamp(value(right));
+  if (leftTime == null) return rightTime == null ? 0 : 1;
+  if (rightTime == null) return -1;
+  return rightTime.compareTo(leftTime);
+}
+
+Map<String, dynamic> buildMobileBolusEntry({
+  required String id,
+  required String patientId,
+  required String patientName,
+  required double units,
+  required DateTime submittedAt,
+  required String localTimeLabel,
+}) =>
+    {
+      'id': id,
+      'patientSlug': patientId,
+      'patient': patientName,
+      'time': localTimeLabel,
+      'administeredUnits': units,
+      'recorded': '$units U',
+      'administeredAt': submittedAt.toUtc().toIso8601String(),
+    };
+
+Map<String, dynamic> buildMobileFoodEntry({
+  required String id,
+  required String patientId,
+  required String patientName,
+  required String meal,
+  required String items,
+  required double carbs,
+  required DateTime submittedAt,
+  required String localTimeLabel,
+}) {
+  final eventAt = submittedAt.toUtc().toIso8601String();
+  return {
+    'id': id,
+    'patientSlug': patientId,
+    'patient': patientName,
+    'time': localTimeLabel,
+    'meal': meal,
+    'items': items,
+    'carbs': '${carbs}g',
+    'impact': 'Pending CGM impact',
+    'status': 'eaten',
+    'plannedEatingAt': eventAt,
+    'actualEatingAt': eventAt,
+    'announcedCarbsG': carbs,
+    'consumedCarbsG': carbs,
+    'confirmAnnouncedAmount': true,
+  };
 }
 
 class PatientMobileApp extends StatefulWidget {
@@ -166,18 +273,32 @@ class _PatientMobileAppState extends State<PatientMobileApp> {
           useMaterial3: true,
           scaffoldBackgroundColor: background,
           colorScheme: ColorScheme.fromSeed(
-              seedColor: green, primary: green, surface: Colors.white),
+              seedColor: green,
+              primary: green,
+              secondary: dashboardCyan,
+              surface: Colors.white,
+              primaryContainer: dashboardIce),
           appBarTheme: const AppBarTheme(
               backgroundColor: Colors.white, foregroundColor: darkGreen),
           inputDecorationTheme: InputDecorationTheme(
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(6))),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: dashboardBorder)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: dashboardBorder)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: green, width: 1.5))),
           cardTheme: CardThemeData(
               color: Colors.white,
-              elevation: 0,
+              elevation: 1,
+              shadowColor: authNavy.withValues(alpha: 0.08),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(7),
-                  side: const BorderSide(color: Color(0xFFE4E7EC)))),
+                  borderRadius: BorderRadius.circular(16),
+                  side: const BorderSide(color: dashboardBorder))),
         ),
         home: loading
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
@@ -219,11 +340,14 @@ class _PatientMobileAppState extends State<PatientMobileApp> {
                         error: error,
                         onRefresh: refresh,
                         onLocalChange: _applyLocal,
+                        onAccountUpdated: (value) async {
+                          if (mounted) setState(() => account = value);
+                        },
                         onSignOut: signOut),
       );
 }
 
-class PatientWelcome extends StatelessWidget {
+class PatientWelcome extends StatefulWidget {
   const PatientWelcome(
       {super.key,
       required this.onSignIn,
@@ -234,93 +358,298 @@ class PatientWelcome extends StatelessWidget {
   final String? error;
 
   @override
-  Widget build(BuildContext context) {
-    final heroHeight =
-        (MediaQuery.sizeOf(context).height * 0.69).clamp(420.0, 620.0);
-    return Scaffold(
-        body: SafeArea(
-            child: ListView(children: [
-      SizedBox(
-          height: heroHeight,
-          child: Stack(fit: StackFit.expand, children: [
-            Image.asset('assets/images/welcome-monitoring.webp',
-                fit: BoxFit.cover, alignment: Alignment.center),
-            Container(color: Colors.black.withValues(alpha: 0.29)),
-            const Positioned(
-                left: 22,
-                top: 22,
-                child: Row(children: [
-                  Icon(Icons.monitor_heart_outlined, color: Colors.white),
-                  SizedBox(width: 8),
-                  Text('Diabetes Digital Twin',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700))
-                ])),
-            Positioned(
-                left: 22,
-                right: 22,
-                bottom: 24,
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Your care,\nin your pocket.',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 35,
-                              height: 1.08,
-                              fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 9),
-                      const Text('Log your day. Stay close to your doctor.',
-                          style: TextStyle(color: Colors.white, fontSize: 15)),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                              onPressed: onSignIn,
-                              style: FilledButton.styleFrom(
-                                  backgroundColor: green,
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14)),
-                              child: const Text('Sign in'))),
-                      SizedBox(
-                          width: double.infinity,
-                          child: TextButton(
-                              onPressed: onCreateAccount,
-                              style: TextButton.styleFrom(
-                                  foregroundColor: Colors.white),
-                              child:
-                                  const Text('New patient? Create account'))),
-                    ])),
-          ])),
-      Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(children: [
-            ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.asset('assets/images/breakfast-log.png',
-                    width: 96, height: 96, fit: BoxFit.cover)),
-            const SizedBox(width: 16),
-            const Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text('A little more in sync',
-                      style: TextStyle(
-                          fontSize: 18,
-                          color: darkGreen,
-                          fontWeight: FontWeight.w700)),
-                  SizedBox(height: 5),
-                  Text('Readings, meals, messages, and your doctor together.',
-                      style: TextStyle(color: muted)),
-                ])),
-          ])),
-      if (error != null)
-        Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(error!, style: const TextStyle(color: Colors.red))),
-    ])));
+  State<PatientWelcome> createState() => _PatientWelcomeState();
+}
+
+class _PatientWelcomeState extends State<PatientWelcome> {
+  bool _started = false;
+  bool _visible = false;
+  bool _reduceMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion) {
+      _started = true;
+      _visible = true;
+    } else if (!_started) {
+      _started = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _visible = true);
+      });
+    }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final width = media.size.width;
+    final illustrationHeight = (width * 0.72).clamp(230.0, 380.0);
+    final transitionDuration =
+        _reduceMotion ? Duration.zero : const Duration(milliseconds: 520);
+    const features = [
+      (
+        icon: Icons.monitor_heart_outlined,
+        title: 'See the whole picture.',
+        description:
+            'Bring glucose readings, meals, and insulin records together.'
+      ),
+      (
+        icon: Icons.auto_graph_rounded,
+        title: 'Glucose predictions',
+        description:
+            'GlucoTwin predicts glucose levels for the next 30, 60, and 120 minutes using your digital twin.'
+      ),
+      (
+        icon: Icons.medication_outlined,
+        title: 'Bolus & basal optimization',
+        description:
+            'Explore personalized bolus doses and basal rates by simulating different insulin options with your digital twin.'
+      ),
+    ];
+
+    return Scaffold(
+      backgroundColor: authNavyDeep,
+      body: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(20, 18, 20, 24 + media.padding.bottom),
+          children: [
+            const Row(children: [
+              Icon(Icons.monitor_heart_outlined,
+                  color: Color(0xFF9DDFFF), size: 25),
+              SizedBox(width: 9),
+              Text('GlucoTwin',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.5)),
+            ]),
+            const SizedBox(height: 18),
+            AnimatedOpacity(
+              opacity: _visible ? 1 : 0,
+              duration: transitionDuration,
+              curve: Curves.easeOut,
+              child: AnimatedSlide(
+                offset: _visible ? Offset.zero : const Offset(0, 0.035),
+                duration: transitionDuration,
+                curve: Curves.easeOutCubic,
+                child: SizedBox(
+                  height: illustrationHeight,
+                  child: Image.asset(
+                    'assets/images/onboarding-digital-twin.png',
+                    fit: BoxFit.contain,
+                    semanticLabel:
+                        'A person connected to an anatomical digital twin and AI model',
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            AnimatedOpacity(
+              opacity: _visible ? 1 : 0,
+              duration: transitionDuration,
+              curve: Curves.easeOut,
+              child: AnimatedSlide(
+                offset: _visible ? Offset.zero : const Offset(0, 0.025),
+                duration: transitionDuration,
+                curve: Curves.easeOutCubic,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text.rich(
+                      const TextSpan(children: [
+                        TextSpan(text: 'Gluco'),
+                        TextSpan(
+                            text: 'Twin',
+                            style: TextStyle(color: Color(0xFF8ED7F7))),
+                      ]),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: (width * 0.135).clamp(44.0, 64.0),
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -2.5,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Meet the digital twin that brings your glucose, daily habits, and care team together—so every day feels a little easier to understand.',
+                      style: TextStyle(
+                          color: Color(0xFFBBD0E0), fontSize: 15, height: 1.65),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: widget.onSignIn,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF97D8F4),
+                          foregroundColor: const Color(0xFF082C49),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Sign in',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: widget.onCreateAccount,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Color(0x668FD8FF)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('New patient? Create account',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 42),
+            const Text('ONE PLACE. A FULLER PICTURE.',
+                style: TextStyle(
+                    color: Color(0xFF91C7E6),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.8)),
+            const SizedBox(height: 14),
+            ...features.map((feature) => Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: _OnboardingFeatureCard(
+                    icon: feature.icon,
+                    title: feature.title,
+                    description: feature.description,
+                  ),
+                )),
+            if (widget.error != null)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF3D2432),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF9B4C64))),
+                child: Text(widget.error!,
+                    style: const TextStyle(color: Color(0xFFFFD9E2))),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnboardingFeatureCard extends StatelessWidget {
+  const _OnboardingFeatureCard(
+      {required this.icon, required this.title, required this.description});
+
+  final IconData icon;
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [Color(0xFF153B59), Color(0xFF0C2A44)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0x2691C6E2)),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: const Color(0x1A8ED7F7),
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: const Color(0xFF9BD5F3), size: 23),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 7),
+                Text(description,
+                    style: const TextStyle(
+                        color: Color(0xFFAAC1D3), fontSize: 13, height: 1.55)),
+              ],
+            ),
+          ),
+        ]),
+      );
+}
+
+ThemeData _authScreenTheme(BuildContext context) {
+  final base = Theme.of(context);
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(10),
+    borderSide: const BorderSide(color: authBorder),
+  );
+  return base.copyWith(
+    scaffoldBackgroundColor: Colors.white,
+    colorScheme: base.colorScheme.copyWith(
+      primary: authBlue,
+      primaryContainer: authIce,
+      onPrimary: Colors.white,
+      surface: Colors.white,
+      outline: authBorder,
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white,
+      border: border,
+      enabledBorder: border,
+      focusedBorder: border.copyWith(
+          borderSide: const BorderSide(color: authBlue, width: 1.8)),
+      errorBorder: border.copyWith(
+          borderSide: const BorderSide(color: Color(0xFFB42318))),
+      focusedErrorBorder: border.copyWith(
+          borderSide: const BorderSide(color: Color(0xFFB42318), width: 1.8)),
+      labelStyle: const TextStyle(color: Color(0xFF526A7C)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: authBlue,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: authBlue.withValues(alpha: 0.45),
+        minimumSize: const Size.fromHeight(50),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(foregroundColor: authBlue),
+    ),
+    cardTheme: CardThemeData(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: authBorder),
+      ),
+    ),
+  );
 }
 
 class PatientSignIn extends StatefulWidget {
@@ -419,253 +748,406 @@ class _PatientSignInState extends State<PatientSignIn> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-          body: SafeArea(
-              child: Center(
-                  child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-                key: key,
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(
-                          alignment: Alignment.centerLeft,
-                          child: IconButton(
-                              tooltip: 'Back to welcome',
-                              onPressed: widget.onBack,
-                              icon: const Icon(Icons.arrow_back,
-                                  color: darkGreen))),
-                      const Icon(Icons.monitor_heart_outlined,
-                          color: green, size: 42),
-                      const SizedBox(height: 16),
-                      const Text('Diabetes Digital Twin',
-                          style: TextStyle(
-                              fontSize: 25,
-                              fontWeight: FontWeight.bold,
-                              color: darkGreen)),
-                      Text(
-                          creating
-                              ? 'Create your patient account'
-                              : 'Patient sign in',
-                          style: const TextStyle(color: muted)),
-                      if (!creating) ...[
-                        const SizedBox(height: 18),
-                        const Text('Saved account',
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final compactHeader = media.size.height < 700;
+
+    return Theme(
+      data: _authScreenTheme(context),
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  color: authNavy,
+                  padding:
+                      EdgeInsets.fromLTRB(12, 8, 20, compactHeader ? 22 : 28),
+                  child: Column(children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: IconButton(
+                        tooltip: 'Back to welcome',
+                        onPressed: widget.onBack,
+                        color: Colors.white,
+                        icon: const Icon(Icons.arrow_back),
+                      ),
+                    ),
+                    Image.asset(
+                      'assets/images/auth-cgm-virtual-patient.png',
+                      height: compactHeader ? 118 : 160,
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      semanticLabel:
+                          'CGM sensor data flowing into a virtual patient digital twin',
+                    ),
+                    const SizedBox(height: 12),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.monitor_heart_outlined,
+                            color: Color(0xFF9DDFFF), size: 23),
+                        SizedBox(width: 8),
+                        Text('Diabetes Digital Twin',
                             style: TextStyle(
-                                fontWeight: FontWeight.w600, color: darkGreen)),
-                        ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const CircleAvatar(
-                                backgroundColor: Color(0xFFEEF7F1),
-                                child:
-                                    Text('OH', style: TextStyle(color: green))),
-                            title: const Text('Omar Hassan'),
-                            subtitle: const Text('omar.hassan@example.com'),
-                            onTap: busy
-                                ? null
-                                : () {
-                                    email.text = 'omar.hassan@example.com';
-                                    password.text = 'password';
-                                    setState(() => error = null);
-                                  }),
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700)),
                       ],
-                      const SizedBox(height: 28),
-                      if (creating) ...[
-                        TextFormField(
-                            controller: name,
-                            decoration:
-                                const InputDecoration(labelText: 'Full name'),
-                            validator: (v) => v == null || v.trim().isEmpty
-                                ? 'Enter your name'
-                                : null),
-                        const SizedBox(height: 12),
-                        Row(children: [
-                          Expanded(
-                              child: TextFormField(
-                                  controller: age,
-                                  keyboardType: TextInputType.number,
+                    ),
+                  ]),
+                ),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 480),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                          24, 28, 24, 28 + media.padding.bottom),
+                      child: Form(
+                        key: key,
+                        child: FocusTraversalGroup(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                creating ? 'Join as a patient' : 'Welcome back',
+                                style: const TextStyle(
+                                  color: Color(0xFF172033),
+                                  fontSize: 27,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.6,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                creating
+                                    ? 'Complete your health information and choose a doctor.'
+                                    : 'Sign in to continue to your dashboard.',
+                                style: const TextStyle(
+                                    color: Color(0xFF667085), height: 1.45),
+                              ),
+                              if (!creating) ...[
+                                const SizedBox(height: 22),
+                                const Text('Saved account',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF172033))),
+                                const SizedBox(height: 8),
+                                Material(
+                                  color: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    side: const BorderSide(color: authBorder),
+                                  ),
+                                  child: ListTile(
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10)),
+                                    leading: const CircleAvatar(
+                                      backgroundColor: authIce,
+                                      child: Text('OH',
+                                          style: TextStyle(
+                                              color: authBlue,
+                                              fontWeight: FontWeight.w700)),
+                                    ),
+                                    title: const Text('Omar Hassan'),
+                                    subtitle:
+                                        const Text('omar.hassan@example.com'),
+                                    onTap: busy
+                                        ? null
+                                        : () {
+                                            email.text =
+                                                'omar.hassan@example.com';
+                                            password.text = 'password';
+                                            setState(() => error = null);
+                                          },
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              if (creating) ...[
+                                TextFormField(
+                                    controller: name,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                        labelText: 'Full name'),
+                                    validator: (v) =>
+                                        v == null || v.trim().isEmpty
+                                            ? 'Enter your name'
+                                            : null),
+                                const SizedBox(height: 12),
+                                LayoutBuilder(builder: (context, constraints) {
+                                  final stackFields =
+                                      constraints.maxWidth < 340 ||
+                                          media.textScaler.scale(1) > 1.25;
+                                  final ageField = TextFormField(
+                                      controller: age,
+                                      keyboardType: TextInputType.number,
+                                      textInputAction: TextInputAction.next,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Age'),
+                                      validator: (v) =>
+                                          (int.tryParse(v ?? '') ?? 0) < 1
+                                              ? 'Enter age'
+                                              : null);
+                                  final weightField = TextFormField(
+                                      controller: weight,
+                                      keyboardType: TextInputType.number,
+                                      textInputAction: TextInputAction.next,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Weight kg'),
+                                      validator: (v) =>
+                                          (double.tryParse(v ?? '') ?? 0) <= 0
+                                              ? 'Enter weight'
+                                              : null);
+                                  if (stackFields) {
+                                    return Column(children: [
+                                      ageField,
+                                      const SizedBox(height: 12),
+                                      weightField,
+                                    ]);
+                                  }
+                                  return Row(children: [
+                                    Expanded(child: ageField),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: weightField),
+                                  ]);
+                                }),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                    controller: height,
+                                    keyboardType: TextInputType.number,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                        labelText: 'Height cm'),
+                                    validator: (v) =>
+                                        (double.tryParse(v ?? '') ?? 0) <= 0
+                                            ? 'Enter height'
+                                            : null),
+                                const SizedBox(height: 28),
+                                const Text('Choose your doctor',
+                                    style: TextStyle(
+                                        color: Color(0xFF172033),
+                                        fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 8),
+                                ...doctors.asMap().entries.map((entry) {
+                                  final doctor =
+                                      entry.value as Map<String, dynamic>;
+                                  final profile = doctor['doctorProfile']
+                                          as Map<String, dynamic>? ??
+                                      {};
+                                  final rating = doctor['rating']
+                                          as Map<String, dynamic>? ??
+                                      {};
+                                  final selected = doctorId == doctor['id'];
+                                  return Card(
+                                      child: InkWell(
+                                          onTap: () => setState(() => doctorId =
+                                              doctor['id'] as String),
+                                          child: Padding(
+                                              padding: const EdgeInsets.all(12),
+                                              child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(children: [
+                                                      Icon(
+                                                          selected
+                                                              ? Icons
+                                                                  .radio_button_checked
+                                                              : Icons
+                                                                  .radio_button_off,
+                                                          color: authBlue),
+                                                      const SizedBox(width: 10),
+                                                      Expanded(
+                                                          child: Text(
+                                                              '#${entry.key + 1}  ${profile['fullName'] ?? 'Doctor'}',
+                                                              style: const TextStyle(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700)))
+                                                    ]),
+                                                    Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(
+                                                                left: 34,
+                                                                top: 4),
+                                                        child: Text(
+                                                            '${profile['specialty'] ?? ''} · ${profile['yearsExperience'] ?? '0'} years experience',
+                                                            style:
+                                                                const TextStyle(
+                                                                    color:
+                                                                        muted))),
+                                                    Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(
+                                                                left: 34,
+                                                                top: 4),
+                                                        child: Text(
+                                                            rating['average'] ==
+                                                                    null
+                                                                ? 'No ratings yet'
+                                                                : '${(rating['average'] as num).toStringAsFixed(1)} / 5 · ${rating['count']} ratings${rating['sample'] == true ? ' (sample)' : ''}',
+                                                            style: const TextStyle(
+                                                                color:
+                                                                    authBlueDark,
+                                                                fontSize: 13))),
+                                                    if (profile['medicalSchool'] !=
+                                                        null)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              '${profile['medicalSchool']}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      color:
+                                                                          muted,
+                                                                      fontSize:
+                                                                          13))),
+                                                    if ('${profile['qualifications'] ?? ''}'
+                                                        .isNotEmpty)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              'Qualifications: ${profile['qualifications']}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                    if (profile['certificates']
+                                                            is List &&
+                                                        (profile['certificates']
+                                                                as List)
+                                                            .isNotEmpty)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              'Certificates: ${(profile['certificates'] as List).join(', ')}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                    if (profile['papers']
+                                                            is List &&
+                                                        (profile['papers']
+                                                                as List)
+                                                            .isNotEmpty)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                                  16, 0, 16, 8),
+                                                          child: Text(
+                                                              'Papers: ${(profile['papers'] as List).join(', ')}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                    if (profile['bio'] != null)
+                                                      Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(16,
+                                                                  0, 16, 12),
+                                                          child: Text(
+                                                              '${profile['bio']}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                      fontSize:
+                                                                          13))),
+                                                  ]))));
+                                }),
+                              ],
+                              TextFormField(
+                                  controller: email,
+                                  keyboardType: TextInputType.emailAddress,
+                                  textInputAction: TextInputAction.next,
+                                  autofillHints: const [AutofillHints.email],
                                   decoration:
-                                      const InputDecoration(labelText: 'Age'),
+                                      const InputDecoration(labelText: 'Email'),
                                   validator: (v) =>
-                                      (int.tryParse(v ?? '') ?? 0) < 1
-                                          ? 'Enter age'
-                                          : null)),
-                          const SizedBox(width: 12),
-                          Expanded(
-                              child: TextFormField(
-                                  controller: weight,
-                                  keyboardType: TextInputType.number,
+                                      v == null || !v.contains('@')
+                                          ? 'Enter a valid email'
+                                          : null),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                  controller: password,
+                                  obscureText: true,
+                                  textInputAction: TextInputAction.done,
+                                  onFieldSubmitted:
+                                      busy ? null : (_) => _submit(),
+                                  autofillHints: [
+                                    creating
+                                        ? AutofillHints.newPassword
+                                        : AutofillHints.password
+                                  ],
                                   decoration: const InputDecoration(
-                                      labelText: 'Weight kg'),
+                                      labelText: 'Password'),
                                   validator: (v) =>
-                                      (double.tryParse(v ?? '') ?? 0) <= 0
-                                          ? 'Enter weight'
-                                          : null))
-                        ]),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                            controller: height,
-                            keyboardType: TextInputType.number,
-                            decoration:
-                                const InputDecoration(labelText: 'Height cm'),
-                            validator: (v) =>
-                                (double.tryParse(v ?? '') ?? 0) <= 0
-                                    ? 'Enter height'
-                                    : null),
-                        const SizedBox(height: 12),
-                        const SizedBox(height: 16),
-                        const Text('Choose your doctor',
-                            style: TextStyle(fontWeight: FontWeight.w700)),
-                        ...doctors.asMap().entries.map((entry) {
-                          final doctor = entry.value as Map<String, dynamic>;
-                          final profile = doctor['doctorProfile']
-                                  as Map<String, dynamic>? ??
-                              {};
-                          final rating =
-                              doctor['rating'] as Map<String, dynamic>? ?? {};
-                          final selected = doctorId == doctor['id'];
-                          return Card(
-                              child: InkWell(
-                                  onTap: () => setState(
-                                      () => doctorId = doctor['id'] as String),
-                                  child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(children: [
-                                              Icon(
-                                                  selected
-                                                      ? Icons
-                                                          .radio_button_checked
-                                                      : Icons.radio_button_off,
-                                                  color: green),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                  child: Text(
-                                                      '#${entry.key + 1}  ${profile['fullName'] ?? 'Doctor'}',
-                                                      style: const TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w700)))
-                                            ]),
-                                            Padding(
-                                                padding: const EdgeInsets.only(
-                                                    left: 34, top: 4),
-                                                child: Text(
-                                                    '${profile['specialty'] ?? ''} · ${profile['yearsExperience'] ?? '0'} years experience',
-                                                    style: const TextStyle(
-                                                        color: muted))),
-                                            Padding(
-                                                padding: const EdgeInsets.only(
-                                                    left: 34, top: 4),
-                                                child: Text(
-                                                    rating['average'] == null
-                                                        ? 'No ratings yet'
-                                                        : '${(rating['average'] as num).toStringAsFixed(1)} / 5 · ${rating['count']} ratings${rating['sample'] == true ? ' (sample)' : ''}',
-                                                    style: const TextStyle(
-                                                        color: darkGreen,
-                                                        fontSize: 13))),
-                                            if (profile['medicalSchool'] !=
-                                                null)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      '${profile['medicalSchool']}',
-                                                      style: const TextStyle(
-                                                          color: muted,
-                                                          fontSize: 13))),
-                                            if ('${profile['qualifications'] ?? ''}'
-                                                .isNotEmpty)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      'Qualifications: ${profile['qualifications']}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                            if (profile['certificates']
-                                                    is List &&
-                                                (profile['certificates']
-                                                        as List)
-                                                    .isNotEmpty)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      'Certificates: ${(profile['certificates'] as List).join(', ')}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                            if (profile['papers'] is List &&
-                                                (profile['papers'] as List)
-                                                    .isNotEmpty)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 8),
-                                                  child: Text(
-                                                      'Papers: ${(profile['papers'] as List).join(', ')}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                            if (profile['bio'] != null)
-                                              Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                          16, 0, 16, 12),
-                                                  child: Text(
-                                                      '${profile['bio']}',
-                                                      style: const TextStyle(
-                                                          fontSize: 13))),
-                                          ]))));
-                        }),
-                      ],
-                      TextFormField(
-                          controller: email,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(labelText: 'Email'),
-                          validator: (v) => v == null || !v.contains('@')
-                              ? 'Enter a valid email'
-                              : null),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                          controller: password,
-                          obscureText: true,
-                          decoration:
-                              const InputDecoration(labelText: 'Password'),
-                          validator: (v) =>
-                              v == null || v.length < (creating ? 8 : 1)
-                                  ? 'Enter your password'
-                                  : null),
-                      if (error != null)
-                        Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Text(error!,
-                                style: const TextStyle(color: Colors.red))),
-                      const SizedBox(height: 20),
-                      FilledButton(
-                          onPressed: busy ? null : _submit,
-                          child: Text(busy
-                              ? 'Please wait...'
-                              : creating
-                                  ? 'Create account'
-                                  : 'Sign in')),
-                      TextButton(
-                          onPressed: () => setState(() {
-                                creating = !creating;
-                                error = null;
-                              }),
-                          child: Text(creating
-                              ? 'Already have an account? Sign in'
-                              : 'New patient? Create account')),
-                    ]))),
-      ))));
+                                      v == null || v.length < (creating ? 8 : 1)
+                                          ? 'Enter your password'
+                                          : null),
+                              if (error != null)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 14),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF1F3),
+                                    borderRadius: BorderRadius.circular(9),
+                                    border: Border.all(
+                                        color: const Color(0xFFFECACA)),
+                                  ),
+                                  child: Text(error!,
+                                      style: const TextStyle(
+                                          color: Color(0xFFB42318))),
+                                ),
+                              const SizedBox(height: 20),
+                              FilledButton(
+                                  onPressed: busy ? null : _submit,
+                                  child: Text(busy
+                                      ? 'Please wait...'
+                                      : creating
+                                          ? 'Create account'
+                                          : 'Sign in')),
+                              const SizedBox(height: 4),
+                              TextButton(
+                                  onPressed: busy
+                                      ? null
+                                      : () => setState(() {
+                                            creating = !creating;
+                                            error = null;
+                                          }),
+                                  child: Text(creating
+                                      ? 'Already have an account? Sign in'
+                                      : 'New patient? Create account')),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class PatientPortal extends StatefulWidget {
@@ -677,6 +1159,7 @@ class PatientPortal extends StatefulWidget {
       required this.error,
       required this.onRefresh,
       required this.onLocalChange,
+      required this.onAccountUpdated,
       required this.onSignOut});
   final SyncApi api;
   final Map<String, dynamic> account;
@@ -684,6 +1167,7 @@ class PatientPortal extends StatefulWidget {
   final String? error;
   final Future<void> Function() onRefresh;
   final Future<void> Function() onLocalChange;
+  final Future<void> Function(Map<String, dynamic>) onAccountUpdated;
   final Future<void> Function() onSignOut;
   @override
   State<PatientPortal> createState() => _PatientPortalState();
@@ -850,10 +1334,18 @@ class _PatientPortalState extends State<PatientPortal>
               children: [
                 if (widget.error != null) _notice(widget.error!),
                 if (actionError != null) _notice(actionError!),
-                if (tab == 0) _overview(),
-                if (tab == 1) _records(),
-                if (tab == 2) _care(),
-                if (tab == 3) _profile(),
+                AnimatedSwitcher(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 180),
+                    child: KeyedSubtree(
+                        key: ValueKey(tab),
+                        child: switch (tab) {
+                          0 => _overview(),
+                          1 => _records(),
+                          2 => _care(),
+                          _ => _profile(),
+                        }))
               ])),
       bottomNavigationBar: NavigationBar(
           selectedIndex: tab,
@@ -883,16 +1375,20 @@ class _PatientPortalState extends State<PatientPortal>
               borderRadius: BorderRadius.circular(6)),
           child: Padding(
               padding: const EdgeInsets.all(12), child: Text(message))));
-  Widget _panel(String title, Widget child) => Card(
+  Widget _panel(String title, Widget child, {Widget? action}) => Card(
       child: Padding(
           padding: const EdgeInsets.all(16),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: darkGreen)),
+            Row(children: [
+              Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: darkGreen))),
+              if (action != null) action,
+            ]),
             const SizedBox(height: 12),
             child
           ])));
@@ -900,17 +1396,15 @@ class _PatientPortalState extends State<PatientPortal>
       Text(text, style: const TextStyle(color: muted));
 
   Widget _overview() {
-    final readings = list('glucose').cast<Map<String, dynamic>>()
+    final food = list('food')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
+      ..sort((a, b) => compareClinicalHistory(a, b, foodHistoryTimestamp));
+    final bolus = list('bolus')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
       ..sort((a, b) =>
-          (a['recordedAt'] as String).compareTo(b['recordedAt'] as String));
-    final latest = readings.isEmpty ? null : readings.last;
-    final chartReadings = readings.length > 12
-        ? readings.sublist(readings.length - 12)
-        : readings;
-    final food = list('food').cast<Map<String, dynamic>>();
-    final bolus = list('bolus').cast<Map<String, dynamic>>();
-    final messages =
-        chronologicalConversationMessages(widget.snapshot['messages']);
+          compareClinicalHistory(a, b, (item) => item['administeredAt']));
     final demo = widget.snapshot['demo'] as Map<String, dynamic>?;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Text('Hello, ${profile['fullName'] ?? 'Patient'}',
@@ -921,65 +1415,14 @@ class _PatientPortalState extends State<PatientPortal>
           style: TextStyle(color: muted)),
       const SizedBox(height: 16),
       if (demo != null) ..._demoDashboard(demo),
-      Row(children: [
-        Expanded(
-            child: FilledButton.icon(
-                onPressed: () => setState(() => tab = 1),
-                icon: const Icon(Icons.add),
-                label: const Text('Record'))),
-        const SizedBox(width: 8),
-        Expanded(
-            child: OutlinedButton.icon(
-                onPressed: () => setState(() => tab = 2),
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Text('Care team')))
-      ]),
+      FilledButton.icon(
+          onPressed: () => setState(() => tab = 1),
+          icon: const Icon(Icons.add),
+          label: const Text('Record food or insulin')),
       const SizedBox(height: 8),
-      _panel(
-          'Latest manual reading',
-          latest == null
-              ? _empty('No readings yet. Record a glucose value to begin.')
-              : Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('${latest['value']}',
-                      style: const TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.bold,
-                          color: darkGreen)),
-                  const Padding(
-                      padding: EdgeInsets.only(bottom: 7, left: 5),
-                      child: Text('mg/dL')),
-                  const Spacer(),
-                  Text('${latest['time']}',
-                      style: const TextStyle(color: muted))
-                ])),
-      if (chartReadings.length >= 2)
-        _panel(
-            'Reading trend',
-            SizedBox(
-                height: 190,
-                child: LineChart(LineChartData(
-                  gridData: const FlGridData(show: true),
-                  borderData: FlBorderData(show: false),
-                  titlesData: const FlTitlesData(show: false),
-                  lineBarsData: [
-                    LineChartBarData(
-                        spots: chartReadings
-                            .asMap()
-                            .entries
-                            .map((entry) => FlSpot(entry.key.toDouble(),
-                                (entry.value['value'] as num).toDouble()))
-                            .toList(),
-                        isCurved: false,
-                        color: green,
-                        barWidth: 3,
-                        dotData: const FlDotData(show: true))
-                  ],
-                )))),
       _panel(
           'Recorded totals',
           Column(children: [
-            _countRow(
-                Icons.bloodtype_outlined, 'Manual readings', readings.length),
             _countRow(
                 Icons.restaurant_outlined, 'Food entries', list('food').length),
             _countRow(
@@ -1002,8 +1445,8 @@ class _PatientPortalState extends State<PatientPortal>
                           leading: const Icon(Icons.restaurant_outlined,
                               color: green),
                           title: Text('${item['meal']}: ${item['items']}'),
-                          subtitle: Text('${item['carbs']} carbs'),
-                          trailing: Text('${item['time'] ?? ''}')))
+                          subtitle: Text(
+                              '${item['carbs']} carbs\n${foodHistoryDateLabel(item)}')))
                       .toList())),
       _panel(
           'Manual bolus log',
@@ -1016,43 +1459,15 @@ class _PatientPortalState extends State<PatientPortal>
                           contentPadding: EdgeInsets.zero,
                           leading:
                               const Icon(Icons.vaccines_outlined, color: green),
-                          title: Text('${item['recorded']} · ${item['meal']}'),
-                          subtitle: Text('Carbs: ${insulinCarbsLabel(item)}'),
-                          trailing: Text('${item['time'] ?? ''}')))
+                          title: Text(bolusUnitsLabel(item)),
+                          subtitle: Text(
+                              formatClinicalDateTime(item['administeredAt']))))
                       .toList())),
-      _panel(
-          'Care-team messages',
-          messages.isEmpty
-              ? _empty(assignment?['status'] == 'accepted'
-                  ? 'No messages yet.'
-                  : 'Messaging opens when your doctor accepts.')
-              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(
-                      '${messages.last['from'] == 'patient' ? 'You' : doctor?['doctorProfile']?['fullName'] ?? 'Doctor'}: ${messages.last['text']}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                      onPressed: () => setState(() => tab = 2),
-                      icon: const Icon(Icons.arrow_forward),
-                      label: const Text('Open conversation'))
-                ])),
-      _panel(
-          'My medical info',
-          Column(children: [
-            _detail('Age', '${profile['age'] ?? ''}'),
-            _detail('Weight', '${profile['weight'] ?? ''} kg'),
-            _detail('Height', '${profile['height'] ?? ''} cm'),
-            _detail('Diabetes type', _profileText(profile['diabetesType'])),
-            _detail('Insulin plan', '${profile['insulinPlan'] ?? 'Not added'}')
-          ])),
       if (demo == null) ...[
-        _panel(
-            'CGM and digital twin',
-            _empty(
-                'No connected CGM or validated forecast is available. Manual readings above are your recorded values.')),
+        _panel('CGM and digital twin',
+            _empty('No connected CGM or validated forecast is available yet.')),
         _notice(
-            'No live CGM or validated prediction feed is connected. These are manually entered values, not treatment recommendations.'),
+            'No live CGM or validated prediction feed is connected. Predictions will appear when a supported feed is available.'),
       ],
     ]);
   }
@@ -1087,6 +1502,7 @@ class _PatientPortalState extends State<PatientPortal>
             _detail('Average glucose', '${summary['averageGlucose']} mg/dL'),
             _detail('Last CGM reading', '${summary['lastReading']}')
           ])),
+      const BolusRecommendationCard(),
       _panel('CGM graph', _sampleChart(cgm, forecast: false)),
       _panel(
           'Predicted glucose · demo',
@@ -1101,7 +1517,7 @@ class _PatientPortalState extends State<PatientPortal>
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _sampleChart(forecast, forecast: true),
             const SizedBox(height: 8),
-            const Text('Green: sample history. Amber: simulated forecast.',
+            const Text('Blue: sample history. Amber: simulated forecast.',
                 style: TextStyle(fontSize: 12, color: muted))
           ])),
     ];
@@ -1221,83 +1637,73 @@ class _PatientPortalState extends State<PatientPortal>
     ]);
   }
 
-  Widget _records() =>
-      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _panel(
-            'Glucose',
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FilledButton.icon(
-                  onPressed: () => _entryDialog('glucose'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Record reading')),
-              const SizedBox(height: 8),
-              ...list('glucose').take(5).map((raw) {
-                final item = raw as Map<String, dynamic>;
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${item['value']} mg/dL'),
-                    subtitle: _syncStatus(item),
-                    trailing: Text('${item['time']}'));
-              }),
-              if (list('glucose').isEmpty) _empty('No readings yet.')
-            ])),
-        _panel(
-            'Food',
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FilledButton.icon(
-                  onPressed: () => _entryDialog('food'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add food')),
-              const SizedBox(height: 8),
-              ...list('food').take(5).map((raw) {
-                final item = raw as Map<String, dynamic>;
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${item['meal']}: ${item['items']}'),
-                    subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('${item['carbs']} carbs · ${item['status']}'),
-                          _syncStatus(item),
-                          if (item['status'] == 'planned')
-                            Wrap(spacing: 8, children: [
-                              TextButton(
-                                  onPressed: () => _updateMeal(item, 'eaten'),
-                                  child: const Text('Mark eaten')),
-                              TextButton(
-                                  onPressed: () =>
-                                      _updateMeal(item, 'cancelled'),
-                                  child: const Text('Cancel'))
-                            ])
-                        ]),
-                    trailing: Text('${item['time']}'));
-              }),
-              if (list('food').isEmpty) _empty('No food entries yet.')
-            ])),
-        _panel(
-            'Manual bolus',
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FilledButton.icon(
-                  onPressed: () => _entryDialog('bolus'),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Log bolus')),
-              const SizedBox(height: 8),
-              ...list('bolus').take(5).map((raw) {
-                final item = raw as Map<String, dynamic>;
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${item['recorded']} at ${item['meal']}'),
-                    subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Carbs: ${insulinCarbsLabel(item)}'),
-                          _syncStatus(item)
-                        ]),
-                    trailing: Text('${item['time']}'));
-              }),
-              if (list('bolus').isEmpty) _empty('No bolus logs yet.')
-            ])),
-      ]);
+  Widget _records() {
+    final food = list('food')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
+      ..sort((a, b) => compareClinicalHistory(a, b, foodHistoryTimestamp));
+    final bolus = list('bolus')
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList()
+      ..sort((a, b) =>
+          compareClinicalHistory(a, b, (item) => item['administeredAt']));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _panel(
+          'Food',
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            FilledButton.icon(
+                onPressed: () => _entryDialog('food'),
+                icon: const Icon(Icons.add),
+                label: const Text('Add food')),
+            const SizedBox(height: 8),
+            ...food.take(5).map((item) {
+              return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${item['meal']}: ${item['items']}'),
+                  subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${item['carbs']} carbs · ${item['status']}'),
+                        Text(foodHistoryDateLabel(item),
+                            style: const TextStyle(color: muted)),
+                        _syncStatus(item),
+                        if (item['status'] == 'planned')
+                          Wrap(spacing: 8, children: [
+                            TextButton(
+                                onPressed: () => _updateMeal(item, 'eaten'),
+                                child: const Text('Mark eaten')),
+                            TextButton(
+                                onPressed: () => _updateMeal(item, 'cancelled'),
+                                child: const Text('Cancel'))
+                          ])
+                      ]));
+            }),
+            if (food.isEmpty) _empty('No food entries yet.')
+          ])),
+      _panel(
+          'Manual bolus',
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            FilledButton.icon(
+                onPressed: () => _entryDialog('bolus'),
+                icon: const Icon(Icons.add),
+                label: const Text('Log bolus')),
+            const SizedBox(height: 8),
+            ...bolus.take(5).map((item) {
+              return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(bolusUnitsLabel(item)),
+                  subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(formatClinicalDateTime(item['administeredAt']),
+                            style: const TextStyle(color: muted)),
+                        _syncStatus(item)
+                      ]));
+            }),
+            if (bolus.isEmpty) _empty('No bolus logs yet.')
+          ])),
+    ]);
+  }
 
   Future<void> _entryDialog(String kind) async {
     await showDialog<void>(
@@ -1630,20 +2036,9 @@ class _PatientPortalState extends State<PatientPortal>
               _empty('Messaging opens after your doctor accepts your request.'),
             if (connected) ...[
               if (messages.isEmpty) _empty('No messages yet.'),
-              ...messages.map((item) => Align(
-                  alignment: item['from'] == 'patient'
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                          color: item['from'] == 'patient'
-                              ? const Color(0xFFEEF7F1)
-                              : Colors.white,
-                          border: Border.all(color: const Color(0xFFE4E7EC)),
-                          borderRadius: BorderRadius.circular(6)),
-                      child: Text('${item['text']}')))),
+              ...messages.map((item) => PortalMessageBubble(
+                  text: '${item['text']}',
+                  outgoing: item['from'] == 'patient')),
               TextField(
                   controller: draft,
                   decoration:
@@ -1674,6 +2069,16 @@ class _PatientPortalState extends State<PatientPortal>
     ]);
   }
 
+  Future<void> _editProfile() async {
+    final updated = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (_) => _PatientProfileEditor(
+            initialProfile: profile, onSave: widget.api.updateProfile));
+    if (updated == null || !mounted) return;
+    await widget.onAccountUpdated(updated);
+    if (mounted) setState(() => actionError = null);
+  }
+
   Widget _profile() =>
       Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _panel(
@@ -1689,7 +2094,12 @@ class _PatientPortalState extends State<PatientPortal>
               _detail('Diagnosis year', '${profile['diagnosisYear'] ?? ''}'),
               _detail('Medications', '${profile['medications'] ?? ''}'),
               _detail('Allergies', '${profile['allergies'] ?? ''}'),
-            ])),
+            ]),
+            action: TextButton.icon(
+                key: const ValueKey('edit-profile'),
+                onPressed: _editProfile,
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit'))),
         if ('${profile['emergencyContact'] ?? ''}'.trim().isNotEmpty)
           _panel(
               'Legacy emergency-contact information',
@@ -1743,10 +2153,6 @@ class _PatientPortalState extends State<PatientPortal>
                   icon: const Icon(Icons.add),
                   label: Text(contactsSaving ? 'Saving…' : 'Add contact')),
             ])),
-        _panel(
-            'Basal plan',
-            _empty(
-                'An AI-suggested basal schedule requires confirmation by your doctor. No confirmed schedule is available here yet.')),
         OutlinedButton.icon(
             onPressed: widget.onSignOut,
             icon: const Icon(Icons.logout),
@@ -1761,6 +2167,233 @@ class _PatientPortalState extends State<PatientPortal>
                 textAlign: TextAlign.end,
                 style: const TextStyle(fontWeight: FontWeight.w600)))
       ]));
+}
+
+class _PatientProfileEditor extends StatefulWidget {
+  const _PatientProfileEditor(
+      {required this.initialProfile, required this.onSave});
+  final Map<String, dynamic> initialProfile;
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic>) onSave;
+
+  @override
+  State<_PatientProfileEditor> createState() => _PatientProfileEditorState();
+}
+
+class _PatientProfileEditorState extends State<_PatientProfileEditor> {
+  final formKey = GlobalKey<FormState>();
+  late final TextEditingController fullName;
+  late final TextEditingController age;
+  late final TextEditingController weight;
+  late final TextEditingController height;
+  late final TextEditingController diagnosisYear;
+  late final TextEditingController insulinPlan;
+  late final TextEditingController medications;
+  late final TextEditingController allergies;
+  late String diabetesType;
+  bool saving = false;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    String value(String key) => '${widget.initialProfile[key] ?? ''}';
+    fullName = TextEditingController(text: value('fullName'));
+    age = TextEditingController(text: value('age'));
+    weight = TextEditingController(text: value('weight'));
+    height = TextEditingController(text: value('height'));
+    diagnosisYear = TextEditingController(text: value('diagnosisYear'));
+    insulinPlan = TextEditingController(text: value('insulinPlan'));
+    medications = TextEditingController(text: value('medications'));
+    allergies = TextEditingController(text: value('allergies'));
+    diabetesType = value('diabetesType');
+    if (!const {'', 'Type 1 Diabetes', 'Type 2 Diabetes'}
+        .contains(diabetesType)) {
+      diabetesType = '';
+    }
+  }
+
+  @override
+  void dispose() {
+    fullName.dispose();
+    age.dispose();
+    weight.dispose();
+    height.dispose();
+    diagnosisYear.dispose();
+    insulinPlan.dispose();
+    medications.dispose();
+    allergies.dispose();
+    super.dispose();
+  }
+
+  String? _requiredText(String? value) =>
+      value == null || value.trim().isEmpty ? 'This field is required.' : null;
+
+  String? _numberInRange(String? value, String label, double min,
+      [double? max]) {
+    final number = double.tryParse(value?.trim() ?? '');
+    if (number == null ||
+        !number.isFinite ||
+        number < min ||
+        max != null && number > max) {
+      return max == null
+          ? '$label must be at least ${min.toStringAsFixed(0)}.'
+          : '$label must be between ${min.toStringAsFixed(0)} and ${max.toStringAsFixed(0)}.';
+    }
+    return null;
+  }
+
+  String? _optionalNumber(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    return double.tryParse(text)?.isFinite == true
+        ? null
+        : 'Enter a valid number.';
+  }
+
+  Future<void> _save() async {
+    if (saving || !(formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      saving = true;
+      error = null;
+    });
+    final payload = <String, dynamic>{
+      ...widget.initialProfile,
+      'fullName': fullName.text.trim(),
+      'age': age.text.trim(),
+      'weight': weight.text.trim(),
+      'height': height.text.trim(),
+      'diabetesType': diabetesType,
+      'insulinPlan': insulinPlan.text.trim(),
+      'diagnosisYear': diagnosisYear.text.trim(),
+      'medications': medications.text.trim(),
+      'allergies': allergies.text.trim(),
+    };
+    try {
+      final account = await widget.onSave(payload);
+      if (mounted) Navigator.of(context).pop(account);
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          saving = false;
+          error = failure.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: const Text('Edit my information'),
+        content: SizedBox(
+          width: 520,
+          child: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextFormField(
+                    key: const ValueKey('profile-full-name'),
+                    controller: fullName,
+                    validator: _requiredText,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Full name')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-age'),
+                    controller: age,
+                    validator: (value) => _numberInRange(value, 'Age', 1, 120),
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Age')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-weight'),
+                    controller: weight,
+                    validator: (value) => _numberInRange(value, 'Weight', 1),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Weight (kg)')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-height'),
+                    controller: height,
+                    validator: (value) => _numberInRange(value, 'Height', 1),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Height (cm)')),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                    key: const ValueKey('profile-diabetes-type'),
+                    initialValue: diabetesType,
+                    onChanged: saving
+                        ? null
+                        : (value) => setState(() => diabetesType = value ?? ''),
+                    decoration:
+                        const InputDecoration(labelText: 'Diabetes type'),
+                    items: const [
+                      DropdownMenuItem(value: '', child: Text('Not provided')),
+                      DropdownMenuItem(
+                          value: 'Type 1 Diabetes',
+                          child: Text('Type 1 Diabetes')),
+                      DropdownMenuItem(
+                          value: 'Type 2 Diabetes',
+                          child: Text('Type 2 Diabetes')),
+                    ]),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-diagnosis-year'),
+                    controller: diagnosisYear,
+                    validator: _optionalNumber,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Diagnosis year')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-insulin-plan'),
+                    controller: insulinPlan,
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Insulin plan')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-medications'),
+                    controller: medications,
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Medications')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-allergies'),
+                    controller: allergies,
+                    decoration: const InputDecoration(labelText: 'Allergies')),
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(error!,
+                          key: const ValueKey('profile-save-error'),
+                          style: const TextStyle(color: Colors.red))),
+                ],
+              ]),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              key: const ValueKey('cancel-profile-edit'),
+              onPressed: saving ? null : () => Navigator.of(context).pop(),
+              child: const Text('Cancel')),
+          FilledButton(
+              key: const ValueKey('save-profile-changes'),
+              onPressed: saving ? null : _save,
+              child: Text(saving ? 'Saving…' : 'Save changes')),
+        ],
+      );
 }
 
 class _ClinicalEntryDialog extends StatefulWidget {
@@ -1781,7 +2414,6 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
   final first = TextEditingController();
   final second = TextEditingController();
   String meal = 'Lunch';
-  String mealStatus = 'planned';
   bool saving = false;
   String? error;
 
@@ -1802,22 +2434,16 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
       setState(() => error = 'Enter glucose between 20 and 600 mg/dL.');
       return;
     }
+    final foodCarbs = double.tryParse(second.text.trim());
     if (widget.kind == 'food' &&
         (first.text.trim().isEmpty ||
-            (double.tryParse(second.text) ?? -1) < 0)) {
+            foodCarbs == null ||
+            !foodCarbs.isFinite ||
+            foodCarbs < 0)) {
       setState(() => error = 'Enter food and non-negative carbohydrates.');
       return;
     }
-    final carbsText = first.text.trim();
-    final bolusCarbs = carbsText.isEmpty ? null : double.tryParse(carbsText);
-    final bolusUnits = double.tryParse(second.text.trim());
-    if (widget.kind == 'bolus' &&
-        ((bolusCarbs != null && (!bolusCarbs.isFinite || bolusCarbs < 0)) ||
-            (carbsText.isNotEmpty && bolusCarbs == null))) {
-      setState(() =>
-          error = 'Carbs must be a finite, non-negative number or left blank.');
-      return;
-    }
+    final bolusUnits = double.tryParse(first.text.trim());
     if (widget.kind == 'bolus' &&
         (bolusUnits == null || !bolusUnits.isFinite || bolusUnits < 0)) {
       setState(() => error = 'Enter a finite, non-negative insulin dose.');
@@ -1830,38 +2456,31 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
     final now = DateTime.now();
     final eventAt = now.toUtc().toIso8601String();
     final id = now.microsecondsSinceEpoch.toRadixString(36);
+    final localTimeLabel = TimeOfDay.fromDateTime(now).format(context);
     final common = {
       'id': id,
       'patientSlug': widget.patientId,
-      'time': TimeOfDay.fromDateTime(now).format(context)
+      'time': localTimeLabel
     };
     final item = widget.kind == 'glucose'
         ? {...common, 'value': firstNumber, 'recordedAt': eventAt}
         : widget.kind == 'food'
-            ? {
-                ...common,
-                'patient': widget.patientName,
-                'meal': meal,
-                'items': first.text.trim(),
-                'carbs': '${second.text}g',
-                'impact': 'Pending CGM impact',
-                'status': mealStatus,
-                'plannedEatingAt': eventAt,
-                if (mealStatus == 'eaten') ...{
-                  'actualEatingAt': eventAt,
-                  'confirmAnnouncedAmount': true
-                }
-              }
-            : {
-                ...common,
-                'patient': widget.patientName,
-                'meal': meal,
-                if (bolusCarbs != null) 'carbsG': bolusCarbs,
-                'recommended': 'Doctor review',
-                'administeredUnits': bolusUnits,
-                'recorded': '$bolusUnits U',
-                'administeredAt': eventAt
-              };
+            ? buildMobileFoodEntry(
+                id: id,
+                patientId: widget.patientId,
+                patientName: widget.patientName,
+                meal: meal,
+                items: first.text.trim(),
+                carbs: foodCarbs!,
+                submittedAt: now,
+                localTimeLabel: localTimeLabel)
+            : buildMobileBolusEntry(
+                id: id,
+                patientId: widget.patientId,
+                patientName: widget.patientName,
+                units: bolusUnits!,
+                submittedAt: now,
+                localTimeLabel: localTimeLabel);
     try {
       await widget.onSave(item);
       if (mounted) Navigator.pop(context);
@@ -1883,7 +2502,7 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                 : 'Log bolus'),
         content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (widget.kind != 'glucose')
+          if (widget.kind == 'food')
             DropdownButtonFormField<String>(
                 initialValue: meal,
                 decoration: const InputDecoration(labelText: 'Meal'),
@@ -1893,20 +2512,6 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                     .toList(),
                 onChanged:
                     saving ? null : (value) => setState(() => meal = value!)),
-          if (widget.kind == 'food') ...[
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-                initialValue: mealStatus,
-                decoration: const InputDecoration(labelText: 'Meal state'),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'planned', child: Text('Plan for later')),
-                  DropdownMenuItem(value: 'eaten', child: Text('Already eaten'))
-                ],
-                onChanged: saving
-                    ? null
-                    : (value) => setState(() => mealStatus = value!))
-          ],
           const SizedBox(height: 12),
           TextField(
               enabled: !saving,
@@ -1919,16 +2524,14 @@ class _ClinicalEntryDialogState extends State<_ClinicalEntryDialog> {
                       ? 'Glucose mg/dL'
                       : widget.kind == 'food'
                           ? 'Food items'
-                          : 'Carbs (g, optional)')),
-          if (widget.kind != 'glucose') ...[
+                          : 'Bolus units')),
+          if (widget.kind == 'food') ...[
             const SizedBox(height: 12),
             TextField(
                 enabled: !saving,
                 controller: second,
                 keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                    labelText:
-                        widget.kind == 'food' ? 'Carbs g' : 'Bolus units'))
+                decoration: const InputDecoration(labelText: 'Carbs g'))
           ],
           if (error != null)
             Padding(

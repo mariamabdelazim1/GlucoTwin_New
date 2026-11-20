@@ -1,103 +1,186 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, Bell, HeartPulse, LineChart, LockKeyhole, ShieldCheck, Stethoscope, Users } from 'lucide-react';
-import heroImage from '../assets/clinical-hero.png';
+import {
+  Activity,
+  ArrowDown,
+  ArrowRight,
+  ArrowUpRight,
+  ChevronRight,
+  CircleHelp,
+  Layers3,
+  ShieldCheck,
+  Stethoscope,
+  Syringe,
+  Utensils,
+} from 'lucide-react';
+import twinFigure from '../assets/onboarding/digital-twin-no-fade.png';
+import './Landing.css';
+
+const features = [
+  {
+    icon: Activity,
+    number: '01',
+    title: 'See the whole picture.',
+    description: 'Bring glucose readings, meals, and insulin records together.',
+  },
+  {
+    icon: Layers3,
+    number: '02',
+    title: 'Glucose predictions',
+    description: 'GlucoTwin predicts glucose levels for the next 30, 60, and 120 minutes using your digital twin.',
+  },
+  {
+    icon: Syringe,
+    number: '03',
+    title: 'Bolus & basal optimization',
+    description: 'Explore personalized bolus doses and basal rates by simulating different insulin options with your digital twin.',
+  },
+];
+
+const faqs = [
+  ['What is a digital twin?', 'A model-based representation that uses your glucose and treatment history to simulate glucose responses and explore what-if scenarios.'],
+  ['What can I track with GlucoTwin?', 'Keep your glucose readings, meal details, and insulin records together so you and your doctor can review your daily history.'],
+  ['How do I connect with a doctor?', 'Select a doctor when creating your patient account. You can share your history and exchange messages after the doctor accepts your request.'],
+  ['What are what-if scenarios?', 'They let you explore how different meal or insulin inputs may affect simulated glucose, using your digital twin. These are model simulations, not guaranteed outcomes.'],
+];
 
 export function Landing() {
+  useEffect(() => {
+    document.documentElement.classList.add('gt-home-active');
+    const page = document.querySelector<HTMLElement>('.gt-home');
+    const heroBackground = document.querySelector<HTMLElement>('.gt-hero-background');
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const revealTargets = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
+    let observer: IntersectionObserver | undefined;
+    let frame = 0;
+
+    if (!reduceMotion.matches && 'IntersectionObserver' in window) {
+      try {
+        page?.classList.add('gt-motion-ready');
+        observer = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            entry.target.classList.add('gt-in-view');
+            observer?.unobserve(entry.target);
+          }
+        }, { rootMargin: '0px 0px -8% 0px', threshold: 0.12 });
+        revealTargets.forEach((target) => observer?.observe(target));
+      } catch {
+        page?.classList.remove('gt-motion-ready');
+      }
+    }
+
+    const updateWaves = () => {
+      frame = 0;
+      if (!heroBackground || reduceMotion.matches || window.innerWidth < 821) return;
+      const progress = Math.min(window.scrollY, heroBackground.offsetHeight);
+      heroBackground.style.setProperty('--gt-wave-shift', `${progress * 0.055}px`);
+    };
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateWaves);
+    };
+    const onMotionChange = () => {
+      if (reduceMotion.matches) {
+        heroBackground?.style.removeProperty('--gt-wave-shift');
+        page?.classList.remove('gt-motion-ready');
+        revealTargets.forEach((target) => target.classList.add('gt-in-view'));
+      } else {
+        onScroll();
+      }
+    };
+
+    updateWaves();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    reduceMotion.addEventListener('change', onMotionChange);
+
+    return () => {
+      document.documentElement.classList.remove('gt-home-active');
+      observer?.disconnect();
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      reduceMotion.removeEventListener('change', onMotionChange);
+      if (frame) window.cancelAnimationFrame(frame);
+      heroBackground?.style.removeProperty('--gt-wave-shift');
+    };
+  }, []);
+
   return (
-    <main className="min-h-screen bg-clinical-bg text-clinical-text">
-      <section className="relative min-h-[92vh] overflow-hidden">
-        <img src={heroImage} alt="Clinical workstation showing glucose monitoring dashboards" className="absolute inset-0 h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-emerald-950/86 via-emerald-950/50 to-white/5" />
-        <header className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-5 md:px-8">
-          <Link to="/" className="focus-ring inline-flex items-center gap-3 rounded-md text-white">
-            <span className="grid h-10 w-10 place-items-center rounded-md bg-white/14 backdrop-blur"><Activity size={21} /></span>
-            <span className="font-bold">Diabetes Digital Twin</span>
+    <main className="gt-home">
+      <div className="gt-hero-background">
+        <header className="gt-nav gt-container">
+          <Link className="gt-brand" to="/" aria-label="GlucoTwin home">
+            <span className="gt-brand-symbol"><Activity size={25} /></span>
+            <span>Gluco<span>Twin</span><small>YOUR HEALTH. IN SYNC.</small></span>
           </Link>
-          <nav className="flex items-center gap-2">
-            <Link to="/login" className="focus-ring rounded-md border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10">Sign in</Link>
-            <Link to="/login/patient?action=register" className="focus-ring rounded-md bg-white px-4 py-2 text-sm font-semibold text-clinical-primaryDark hover:bg-emerald-50">Create account</Link>
-            <Link to="/doctors" className="focus-ring hidden rounded-md border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 sm:inline-flex">Find a Doctor</Link>
+          <nav className="gt-nav-actions" aria-label="Account navigation">
+            <Link to="/login" className="gt-sign-in">Sign in <ArrowUpRight size={15} /></Link>
+            <Link to="/login/patient?action=register" className="gt-button gt-button-small">Create account <ArrowRight size={15} /></Link>
           </nav>
         </header>
-        <div className="relative z-10 mx-auto flex min-h-[calc(92vh-80px)] max-w-7xl items-center px-5 pb-16 pt-10 md:px-8">
-          <div className="max-w-2xl text-white">
-            <p className="inline-flex items-center gap-2 rounded-md border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-semibold uppercase backdrop-blur">
-              <ShieldCheck size={15} /> Clinical decision-support prototype
-            </p>
-            <h1 className="mt-5 text-4xl font-bold leading-tight md:text-6xl">Diabetes Digital Twin</h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-emerald-50 md:text-lg">
-              A calm clinical workspace for doctors to review CGM readings, glucose trends, simulated digital-twin forecasts, insulin context, and patient messages.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link to="/login/doctor" className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-5 py-3 font-semibold text-white hover:bg-clinical-primaryDark">
-                Doctor sign in <Stethoscope size={18} />
-              </Link>
-              <Link to="/login/patient" className="focus-ring inline-flex items-center gap-2 rounded-md bg-white px-5 py-3 font-semibold text-clinical-primaryDark hover:bg-emerald-50">
-                Patient sign in <HeartPulse size={18} />
-              </Link>
-            </div>
-          </div>
-        </div>
-        <div className="absolute bottom-8 right-5 z-10 hidden w-[360px] rounded-lg border border-white/25 bg-white/92 p-4 shadow-xl backdrop-blur lg:block">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase text-clinical-muted">Live CGM Snapshot</p>
-              <p className="mt-1 text-2xl font-bold">142 mg/dL</p>
-            </div>
-            <LineChart className="text-clinical-cgm" size={28} />
-          </div>
-          <div className="mt-4 h-24 overflow-hidden rounded-md border border-clinical-border bg-white p-3">
-            <div className="landing-wave h-full" aria-hidden="true" />
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-            <span className="rounded-md bg-green-50 p-2 font-semibold text-clinical-success">74% TIR</span>
-            <span className="rounded-md bg-emerald-50 p-2 font-semibold text-clinical-primaryDark">3 hr forecast</span>
-            <span className="rounded-md bg-amber-50 p-2 font-semibold text-clinical-warning">23% high</span>
-          </div>
-        </div>
-      </section>
 
-      <section className="mx-auto max-w-7xl px-5 py-12 md:px-8">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {[
-            { icon: Users, title: 'Doctor dashboards', text: 'Prioritize patients by CGM alerts, glucose status, and message urgency.' },
-            { icon: Activity, title: 'CGM review', text: 'Scan current glucose, 24-hour trends, target ranges, and historical context.' },
-            { icon: Stethoscope, title: 'Digital twin forecast', text: 'Preview simulated physiological-model projections as decision support.' },
-            { icon: LockKeyhole, title: 'Clinical access', text: 'Separate workspaces for patients, doctors, and administrators.' },
-          ].map(({ icon: Icon, title, text }) => (
-            <article key={title} className="surface p-5">
-              <div className="mb-4 grid h-10 w-10 place-items-center rounded-md bg-clinical-secondary text-clinical-primary">
-                <Icon size={20} />
-              </div>
-              <h2 className="font-semibold">{title}</h2>
-              <p className="mt-2 text-sm leading-6 text-clinical-muted">{text}</p>
+        <section className="gt-hero gt-container" aria-labelledby="gt-home-title">
+          <div className="gt-hero-copy">
+            <h1 id="gt-home-title" className="gt-product-title">Gluco<span>Twin</span></h1>
+            <p className="gt-hero-description">Meet the digital twin that brings your glucose, daily habits, and care team together—so every day feels a little easier to understand.</p>
+            <div className="gt-hero-buttons">
+              <Link to="/login/patient?action=register" className="gt-button">Create an account <ArrowRight size={18} /></Link>
+              <a href="#how-it-works" className="gt-text-link">Explore GlucoTwin <span><ArrowDown size={16} /></span></a>
+            </div>
+            <div className="gt-hero-footnote"><ShieldCheck size={17} /><span>Built around you. Connected to your doctor.</span></div>
+          </div>
+          <div className="gt-twin-art">
+            <img src={twinFigure} alt="A person wearing a glucose sensor connected to an anatomical digital twin and AI model" />
+            <p>A digital twin, built around you.</p>
+          </div>
+        </section>
+
+        <div className="gt-context-strip gt-container" aria-label="Connected health information">
+          <span>YOUR DAY, CONNECTED</span>
+          <div><Activity size={18} /> Glucose history</div>
+          <div><Utensils size={18} /> Meals &amp; insulin</div>
+          <div><Layers3 size={18} /> Digital twin insights</div>
+          <div><Stethoscope size={18} /> Your care team</div>
+        </div>
+      </div>
+
+      <section id="how-it-works" className="gt-how gt-container" aria-labelledby="gt-features-title">
+        <div className="gt-section-top" data-reveal>
+          <p className="gt-eyebrow">LESS FRAGMENTED. MORE CONNECTED.</p>
+          <h2 id="gt-features-title">One place. A fuller picture.</h2>
+        </div>
+        <div className="gt-feature-grid">
+          {features.map(({ icon: Icon, number, title, description }, index) => (
+            <article key={number} className={`gt-feature gt-reveal-delay-${index + 1}`} data-reveal>
+              <div className="gt-feature-top"><span className="gt-feature-icon"><Icon size={25} /></span><span>{number}</span></div>
+              <h3>{title}</h3>
+              <p>{description}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="border-y border-clinical-border bg-white">
-        <div className="mx-auto grid max-w-7xl gap-8 px-5 py-12 md:px-8 lg:grid-cols-[1fr_420px] lg:items-center">
-          <div>
-            <h2 className="text-2xl font-bold md:text-3xl">Built for quick clinical scanning</h2>
-            <p className="mt-3 max-w-2xl text-clinical-muted">
-              The interface keeps data dense but readable: status labels never rely on color alone, charts resize cleanly, and patient details keep clinically relevant values close together.
-            </p>
-          </div>
-          <div className="rounded-lg border border-clinical-border bg-clinical-bg p-4">
-            <div className="flex items-center justify-between border-b border-clinical-border pb-3">
-              <span className="font-semibold">Patients Needing Attention</span>
-              <Bell className="text-clinical-warning" size={18} />
-            </div>
-            {['Omar Hassan - High', 'Mariam Ali - Low', 'Ahmed Samir - Above Range'].map((row) => (
-              <div key={row} className="flex items-center justify-between border-b border-clinical-border py-3 last:border-b-0">
-                <span className="text-sm">{row}</span>
-                <span className="h-2 w-16 rounded-full bg-clinical-cgm/40"><span className="block h-2 w-10 rounded-full bg-clinical-cgm" /></span>
-              </div>
-            ))}
-          </div>
+      <section id="questions" className="gt-faq gt-container" aria-labelledby="gt-faq-title">
+        <div className="gt-faq-intro" data-reveal>
+          <p className="gt-eyebrow">A LITTLE MORE CLARITY</p>
+          <h2 id="gt-faq-title">Good questions.<br />Clear answers.</h2>
+          <CircleHelp size={38} aria-hidden="true" />
+        </div>
+        <div className="gt-faq-list" data-reveal>
+          {faqs.map(([question, answer]) => (
+            <details key={question}>
+              <summary>{question}<ChevronRight size={18} aria-hidden="true" /></summary>
+              <p>{answer}</p>
+            </details>
+          ))}
         </div>
       </section>
+
+      <footer className="gt-footer gt-container">
+        <Link to="/" className="gt-brand" aria-label="GlucoTwin home"><span className="gt-brand-symbol"><Activity size={22} /></span><span>Gluco<span>Twin</span></span></Link>
+        <p>A digital twin. A more connected journey.</p>
+        <span>© 2026 GlucoTwin</span>
+      </footer>
     </main>
   );
 }

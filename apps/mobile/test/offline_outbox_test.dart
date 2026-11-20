@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glucotwin/data/sync_api.dart';
+import 'package:glucotwin/patient_app.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,6 +58,56 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('profile update uses the shared API and persists across app restart',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a', token: true);
+    late Map<String, dynamic> submittedProfile;
+    final client = MockClient((request) async {
+      expect(request.method, 'PUT');
+      expect(request.url.path, '/api/profile');
+      expect(request.headers['authorization'], 'Bearer synthetic-token');
+      submittedProfile = Map<String, dynamic>.from(
+          (jsonDecode(request.body) as Map)['profile'] as Map);
+      return http.Response(
+          jsonEncode({
+            'account': {
+              'id': 'patient-a',
+              'role': 'patient',
+              'email': 'patient-a@example.test',
+              'patientProfile': submittedProfile,
+            }
+          }),
+          200,
+          headers: {'content-type': 'application/json'});
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    final updated = await api.updateProfile({
+      'fullName': 'Updated Patient',
+      'age': '35',
+      'weight': '83.5',
+      'height': '178',
+      'diabetesType': 'Type 1 Diabetes',
+      'insulinPlan': 'Basal-bolus therapy',
+      'diagnosisYear': '2012',
+      'medications': 'Insulin',
+      'allergies': 'None reported',
+      'emergencyContact': '',
+      'selectedDoctorId': 'DR-001',
+    });
+
+    expect(updated['patientProfile']['fullName'], 'Updated Patient');
+    expect(submittedProfile['selectedDoctorId'], 'DR-001');
+    final relaunched = SyncApi(store: store);
+    await relaunched.restore();
+    expect(relaunched.cachedAccount?['patientProfile']['weight'], '83.5');
+    expect(
+        (await relaunched.localSnapshot())['account']['patientProfile']
+            ['fullName'],
+        'Updated Patient');
+  });
+
   test('pending record survives a new SyncApi instance with stable content',
       () async {
     final store = MemoryStore();
@@ -80,6 +131,48 @@ void main() {
     expect(row['value'], 0);
     expect(row['recordedAt'], recordedAt);
     expect(row['syncState'], 'pending');
+  });
+
+  test('simplified food and bolus payloads survive an app restart', () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a');
+    final first = SyncApi(store: store);
+    await first.restore();
+    final submittedAt = DateTime.parse('2026-11-19T11:12:00+02:00');
+    await first.queueAdd(
+        'bolus',
+        buildMobileBolusEntry(
+            id: 'restart-dose',
+            patientId: 'patient-a',
+            patientName: 'Patient A',
+            units: 2.5,
+            submittedAt: submittedAt,
+            localTimeLabel: '1:12 PM'));
+    await first.queueAdd(
+        'food',
+        buildMobileFoodEntry(
+            id: 'restart-meal',
+            patientId: 'patient-a',
+            patientName: 'Patient A',
+            meal: 'Lunch',
+            items: 'Oats',
+            carbs: 0,
+            submittedAt: submittedAt,
+            localTimeLabel: '1:12 PM'));
+
+    final relaunched = SyncApi(store: store);
+    await relaunched.restore();
+    final snapshot = await relaunched.localSnapshot();
+    final bolus = (snapshot['bolus'] as List).single as Map;
+    final food = (snapshot['food'] as List).single as Map;
+    expect(bolus['administeredUnits'], 2.5);
+    expect(bolus.containsKey('meal'), isFalse);
+    expect(bolus.containsKey('carbsG'), isFalse);
+    expect(food, containsPair('status', 'eaten'));
+    expect(food, containsPair('consumedCarbsG', 0));
+    expect(food['actualEatingAt'], food['plannedEatingAt']);
+    expect(bolus['syncState'], 'pending');
+    expect(food['syncState'], 'pending');
   });
 
   test('outbox is isolated from a different signed-in account', () async {

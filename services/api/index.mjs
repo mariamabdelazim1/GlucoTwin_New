@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertDatabaseReady, createPool, withTransaction } from './db.mjs';
-import { ApiError, passwordHash, validPassword } from './lib.mjs';
+import { ApiError, passwordHash, validPassword, validateDoctorRegistration } from './lib.mjs';
 import {
   accountByEmail, accountById, addMessage, addPatientRecord, audit, createEmergencyContact,
   deleteEmergencyContact, doctorDirectory, emergencyContacts, publicAccount, rateDoctor,
@@ -76,15 +76,17 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path === '/api/auth/bridge') {
       const { account } = await readBody(req);
       if (!account || !['patient', 'doctor'].includes(account.role) || !account.id || !account.email || typeof account.password !== 'string') throw new ApiError(400, 'Invalid account');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(account.email))) throw new ApiError(400, 'Enter a valid email address');
       const byEmail = await accountByEmail(pool, account.email);
       const byId = await accountById(pool, account.id);
       if (!byEmail && byId) throw new ApiError(409, 'Account ID is already registered to another identity');
-      if (!byEmail && account.role === 'doctor') throw new ApiError(403, 'Doctor accounts must be provisioned by an authorized administrator');
       if (!byEmail && account.password.length < 8) throw new ApiError(400, 'Password must be at least 8 characters');
-      if (byEmail && (byEmail.id !== account.id || byEmail.role !== account.role || !validPassword(account.password, byEmail.password_hash))) throw new ApiError(401, 'Account mismatch');
+      if (!byEmail && account.role === 'doctor') validateDoctorRegistration(account);
+      if (byEmail && (byEmail.id !== account.id || byEmail.role !== account.role)) throw new ApiError(409, 'An account with this email already exists');
+      if (byEmail && !validPassword(account.password, byEmail.password_hash)) throw new ApiError(401, 'Account mismatch');
       let initialAssignment = null;
       if (!byEmail) {
-        await withTransaction(pool, async (db) => {
+        try { await withTransaction(pool, async (db) => {
           if (account.role === 'patient' && account.patientProfile?.selectedDoctorId) {
             const doctor = await accountById(db, account.patientProfile.selectedDoctorId);
             if (!doctor || doctor.role !== 'doctor') throw new ApiError(400, 'Choose an available doctor');
@@ -95,7 +97,10 @@ const server = createServer(async (req, res) => {
           if (account.role === 'patient' && account.patientProfile?.selectedDoctorId) {
             initialAssignment = await requestDoctorInTransaction(db, account.id, account.patientProfile.selectedDoctorId);
           }
-        });
+        }); } catch (error) {
+          if (error.code === '23505') throw new ApiError(409, 'An account with this email already exists');
+          throw error;
+        }
       } else await withTransaction(pool, async (db) => {
         const profile = account.patientProfile || account.doctorProfile || {};
         if (byEmail.role === 'patient' && profile.selectedDoctorId && profile.selectedDoctorId !== byEmail.selected_doctor_id) {

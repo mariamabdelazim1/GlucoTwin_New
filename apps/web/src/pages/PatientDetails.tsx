@@ -82,7 +82,7 @@ export function PatientDetails({ foodEntries, bolusEntries, glucoseEntries, acce
           <div><h2 className="text-xl font-semibold">Continuous Glucose Monitoring</h2><p className="text-sm text-clinical-muted">24-hour glucose pattern with low, target, and high zones.</p></div>
           <div className="flex flex-wrap gap-2" role="group" aria-label="CGM time range">
             {['3H', '6H', '12H', '24H', '7D', '14D'].map((item) => (
-              <button key={item} onClick={() => setRange(item)} className={`focus-ring rounded-md border px-3 py-1.5 text-sm font-semibold ${range === item ? 'border-clinical-primary bg-emerald-50 text-clinical-primaryDark' : 'border-clinical-border text-clinical-muted'}`}>{item}</button>
+              <button key={item} onClick={() => setRange(item)} className={`focus-ring rounded-md border px-3 py-1.5 text-sm font-semibold ${range === item ? 'border-clinical-primary bg-clinical-secondary text-clinical-primaryDark' : 'border-clinical-border text-clinical-muted'}`}>{item}</button>
             ))}
           </div>
         </div>
@@ -139,12 +139,12 @@ export function PatientDetails({ foodEntries, bolusEntries, glucoseEntries, acce
         {tab === 'Basal' ? (
           <div className="grid gap-5 lg:grid-cols-2">
             <div><h3 className="font-semibold">Current Basal Schedule</h3><div className="mt-3 divide-y divide-clinical-border rounded-lg border border-clinical-border">{basalSchedule.map((row) => <div className="flex justify-between p-3" key={row.period}><span>{row.period}</span><strong>{row.current}</strong></div>)}</div></div>
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><h3 className="font-semibold">Digital Twin Suggested Basal</h3><div className="mt-3 divide-y divide-emerald-100">{basalSchedule.map((row) => <div className="flex justify-between py-3" key={row.period}><span>{row.period}</span><strong>{row.suggested}</strong></div>)}</div><ClinicalWarning />{basalConfirmed ? <p className="mt-4 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-clinical-success"><CheckCircle2 size={17} /> Confirmed by doctor</p> : <button onClick={() => setBasalConfirmed(true)} className="focus-ring mt-4 rounded-md bg-clinical-primary px-4 py-2 text-sm font-semibold text-white">Confirm Basal Schedule</button>}</div>
+            <div className="rounded-lg border border-clinical-border bg-clinical-secondary p-4"><h3 className="font-semibold">Digital Twin Suggested Basal</h3><div className="mt-3 divide-y divide-clinical-border">{basalSchedule.map((row) => <div className="flex justify-between py-3" key={row.period}><span>{row.period}</span><strong>{row.suggested}</strong></div>)}</div><ClinicalWarning />{basalConfirmed ? <p className="mt-4 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-clinical-success"><CheckCircle2 size={17} /> Confirmed by doctor</p> : <button onClick={() => setBasalConfirmed(true)} className="focus-ring mt-4 rounded-md bg-clinical-primary px-4 py-2 text-sm font-semibold text-white">Confirm Basal Schedule</button>}</div>
           </div>
         ) : (
           <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
             <div className="divide-y divide-clinical-border rounded-lg border border-clinical-border">{patientBolus.map((entry) => <div className="grid gap-2 p-4 md:grid-cols-4" key={entry.id}><strong>{entry.time}</strong><span>{entry.meal}</span><span>Carbs: {entry.carbs || 'Not provided'}</span><span>Recorded: {entry.recorded}</span></div>)}</div>
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><h3 className="font-semibold">Suggested Bolus</h3><p className="mt-2 text-3xl font-bold text-clinical-primaryDark">5.5 U</p><p className="mt-3 text-sm"><strong>Reason:</strong><br />Meal carbohydrates: 62g<br />Current glucose: 184 mg/dL<br />Active insulin: 1.2 U</p><div className="mt-4"><ClinicalWarning /></div></div>
+            <div className="rounded-lg border border-clinical-border bg-clinical-secondary p-4"><h3 className="font-semibold">Suggested Bolus</h3><p className="mt-2 text-3xl font-bold text-clinical-primaryDark">5.5 U</p><p className="mt-3 text-sm"><strong>Reason:</strong><br />Meal carbohydrates: 62g<br />Current glucose: 184 mg/dL<br />Active insulin: 1.2 U</p><div className="mt-4"><ClinicalWarning /></div></div>
           </div>
         )}
       </section>
