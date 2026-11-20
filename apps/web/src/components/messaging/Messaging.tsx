@@ -25,7 +25,7 @@ export function ConversationList({ messages, selected, onSelect }: { messages: M
               </span>
               <span className="mt-1 line-clamp-2 text-xs text-clinical-muted">{message.text}</span>
             </span>
-            {message.unread ? <span className="mt-1 h-2 w-2 rounded-full bg-clinical-primary" aria-label="Unread conversation" /> : null}
+            {message.unread && message.from === 'patient' ? <span className="mt-1 h-2 w-2 rounded-full bg-clinical-primary" aria-label="Unread conversation" /> : null}
           </button>
         ))}
       </div>

@@ -114,6 +114,7 @@ export interface Message {
   text: string;
   time: string;
   unread?: boolean;
+  unreadFor?: 'patient' | 'doctor';
   sentAt?: string;
   syncState?: 'pending' | 'synced' | 'conflict' | 'failed';
   syncAttempts?: number;
@@ -170,10 +171,13 @@ export interface BolusEntry {
 
 export interface NotificationItem {
   id: string;
+  recipientRole: 'patient' | 'doctor' | 'all';
+  recipientId?: string;
   patientSlug?: string;
   doctorId?: string;
+  messageId?: string;
   group: 'Today' | 'Yesterday' | 'Earlier';
-  type: 'Critical glucose' | 'Patient message' | 'Digital twin alert' | 'Patient assigned' | 'System notice';
+  type: 'Critical glucose' | 'Patient message' | 'Doctor message' | 'Digital twin alert' | 'Patient assigned' | 'System notice';
   title: string;
   body: string;
   time: string;
