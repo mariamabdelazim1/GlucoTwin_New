@@ -11,6 +11,66 @@ import 'package:glucotwin/presentation/widgets/bolus_recommendation_card.dart';
 import 'package:glucotwin/presentation/widgets/portal_message_bubble.dart';
 import 'package:glucotwin/core/constants/app_colors.dart';
 
+class _ProfileTestApi extends SyncApi {
+  bool failSave = false;
+  final List<Map<String, dynamic>> savedProfiles = [];
+
+  @override
+  Future<List<Map<String, dynamic>>> emergencyContacts() async => [];
+
+  @override
+  Future<Map<String, dynamic>> updateProfile(
+      Map<String, dynamic> profile) async {
+    savedProfiles.add(Map<String, dynamic>.from(profile));
+    if (failSave) throw ApiException('Profile save failed. Try again.');
+    return {
+      'id': 'p1',
+      'email': 'patient@example.test',
+      'patientProfile': Map<String, dynamic>.from(profile),
+    };
+  }
+}
+
+class _ProfileHarness extends StatefulWidget {
+  const _ProfileHarness({required this.api});
+  final _ProfileTestApi api;
+
+  @override
+  State<_ProfileHarness> createState() => _ProfileHarnessState();
+}
+
+class _ProfileHarnessState extends State<_ProfileHarness> {
+  Map<String, dynamic> account = {
+    'id': 'p1',
+    'email': 'patient@example.test',
+    'patientProfile': {
+      'fullName': 'Omar Hassan',
+      'age': '34',
+      'weight': '82',
+      'height': '178',
+      'diabetesType': 'Type 1 Diabetes',
+      'insulinPlan': 'Basal-bolus therapy',
+      'diagnosisYear': '2012',
+      'medications': 'Insulin',
+      'allergies': 'None reported',
+      'emergencyContact': '',
+      'selectedDoctorId': 'DR-001',
+    },
+  };
+
+  @override
+  Widget build(BuildContext context) => PatientPortal(
+        api: widget.api,
+        account: account,
+        snapshot: const {},
+        error: null,
+        onRefresh: () async {},
+        onLocalChange: () async {},
+        onAccountUpdated: (value) async => setState(() => account = value),
+        onSignOut: () async {},
+      );
+}
+
 void main() {
   test('mobile clinical payloads match the units-only and eaten-food contracts',
       () {
@@ -108,6 +168,7 @@ void main() {
       error: null,
       onRefresh: () async {},
       onLocalChange: () async {},
+      onAccountUpdated: (_) async {},
       onSignOut: () async {},
     )));
     await tester.pumpAndSettle();
@@ -207,6 +268,7 @@ void main() {
       error: null,
       onRefresh: () async {},
       onLocalChange: () async {},
+      onAccountUpdated: (_) async {},
       onSignOut: () async {},
     )));
     await tester.tap(find.text('Record').last);
@@ -238,6 +300,93 @@ void main() {
     expect(find.text('Plan for later'), findsNothing);
     expect(find.text('Already eaten'), findsNothing);
     expect(find.text('Glucose'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('profile edit is prefilled, cancellable, and removes Basal plan',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ProfileTestApi();
+    await tester.pumpWidget(MaterialApp(home: _ProfileHarness(api: api)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Basal plan'), findsNothing);
+    expect(
+        find.text(
+            'An AI-suggested basal schedule requires confirmation by your doctor. No confirmed schedule is available here yet.'),
+        findsNothing);
+    expect(find.text('Insulin plan'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('edit-profile')));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.byKey(const ValueKey('profile-full-name')))
+            .controller!
+            .text,
+        'Omar Hassan');
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.byKey(const ValueKey('profile-insulin-plan')))
+            .controller!
+            .text,
+        'Basal-bolus therapy');
+    await tester.enterText(
+        find.byKey(const ValueKey('profile-full-name')), 'Unsaved Name');
+    await tester.tap(find.byKey(const ValueKey('cancel-profile-edit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Unsaved Name'), findsNothing);
+    expect(find.text('Omar Hassan'), findsOneWidget);
+    expect(api.savedProfiles, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'profile save failure keeps values for retry and success updates immediately',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ProfileTestApi()..failSave = true;
+    await tester.pumpWidget(MaterialApp(home: _ProfileHarness(api: api)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('edit-profile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('profile-full-name')), 'Omar Updated');
+    await tester.enterText(
+        find.byKey(const ValueKey('profile-weight')), '83.5');
+    await tester.tap(find.byKey(const ValueKey('save-profile-changes')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Profile save failed. Try again.'), findsOneWidget);
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.byKey(const ValueKey('profile-full-name')))
+            .controller!
+            .text,
+        'Omar Updated');
+    api.failSave = false;
+    await tester.tap(find.byKey(const ValueKey('save-profile-changes')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit my information'), findsNothing);
+    expect(find.text('Omar Updated'), findsOneWidget);
+    expect(find.text('83.5 kg'), findsOneWidget);
+    expect(api.savedProfiles, hasLength(2));
+    expect(api.savedProfiles.last['selectedDoctorId'], 'DR-001');
+    expect(api.savedProfiles.last['insulinPlan'], 'Basal-bolus therapy');
     expect(tester.takeException(), isNull);
   });
 
@@ -281,6 +430,7 @@ void main() {
       error: null,
       onRefresh: () async {},
       onLocalChange: () async {},
+      onAccountUpdated: (_) async {},
       onSignOut: () async {},
     )));
     await tester.pump();

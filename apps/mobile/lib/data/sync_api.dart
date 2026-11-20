@@ -296,6 +296,34 @@ class SyncApi {
     return saved;
   }
 
+  Future<JsonMap> updateProfile(JsonMap profile) async {
+    final expectedId = currentPatientId;
+    final expectedToken = token;
+    final expectedRevision = _sessionRevision;
+    if (expectedId == null || expectedToken == null) {
+      throw ApiException('Sign in before updating your profile.',
+          statusCode: 401);
+    }
+    final result = await request('profile',
+        method: 'PUT', data: {'profile': profile}, bearerToken: expectedToken);
+    final account = Map<String, dynamic>.from(result['account'] as Map);
+    if (account['id'] != expectedId) {
+      throw ApiException('The updated profile belongs to another account.',
+          statusCode: 403);
+    }
+    await _withSessionLock(() async {
+      if (!_ownsSession(expectedId, expectedToken, expectedRevision)) {
+        throw ApiException(
+            'The active account changed before the profile was saved.');
+      }
+      cachedAccount = Map<String, dynamic>.from(account);
+      _serverSnapshot = {..._serverSnapshot, 'account': cachedAccount};
+      await store.write(_accountKey, jsonEncode(cachedAccount));
+      await store.write(_snapshotKey(expectedId), jsonEncode(_serverSnapshot));
+    });
+    return account;
+  }
+
   Future<JsonMap> snapshot() async {
     final expectedId = currentPatientId;
     final expectedToken = token;

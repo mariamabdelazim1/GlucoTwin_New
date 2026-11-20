@@ -58,6 +58,56 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('profile update uses the shared API and persists across app restart',
+      () async {
+    final store = MemoryStore();
+    await seedSession(store, 'patient-a', token: true);
+    late Map<String, dynamic> submittedProfile;
+    final client = MockClient((request) async {
+      expect(request.method, 'PUT');
+      expect(request.url.path, '/api/profile');
+      expect(request.headers['authorization'], 'Bearer synthetic-token');
+      submittedProfile = Map<String, dynamic>.from(
+          (jsonDecode(request.body) as Map)['profile'] as Map);
+      return http.Response(
+          jsonEncode({
+            'account': {
+              'id': 'patient-a',
+              'role': 'patient',
+              'email': 'patient-a@example.test',
+              'patientProfile': submittedProfile,
+            }
+          }),
+          200,
+          headers: {'content-type': 'application/json'});
+    });
+    final api = SyncApi(store: store, client: client);
+    await api.restore();
+    final updated = await api.updateProfile({
+      'fullName': 'Updated Patient',
+      'age': '35',
+      'weight': '83.5',
+      'height': '178',
+      'diabetesType': 'Type 1 Diabetes',
+      'insulinPlan': 'Basal-bolus therapy',
+      'diagnosisYear': '2012',
+      'medications': 'Insulin',
+      'allergies': 'None reported',
+      'emergencyContact': '',
+      'selectedDoctorId': 'DR-001',
+    });
+
+    expect(updated['patientProfile']['fullName'], 'Updated Patient');
+    expect(submittedProfile['selectedDoctorId'], 'DR-001');
+    final relaunched = SyncApi(store: store);
+    await relaunched.restore();
+    expect(relaunched.cachedAccount?['patientProfile']['weight'], '83.5');
+    expect(
+        (await relaunched.localSnapshot())['account']['patientProfile']
+            ['fullName'],
+        'Updated Patient');
+  });
+
   test('pending record survives a new SyncApi instance with stable content',
       () async {
     final store = MemoryStore();

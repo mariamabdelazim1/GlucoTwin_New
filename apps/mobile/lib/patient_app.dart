@@ -340,6 +340,9 @@ class _PatientMobileAppState extends State<PatientMobileApp> {
                         error: error,
                         onRefresh: refresh,
                         onLocalChange: _applyLocal,
+                        onAccountUpdated: (value) async {
+                          if (mounted) setState(() => account = value);
+                        },
                         onSignOut: signOut),
       );
 }
@@ -1156,6 +1159,7 @@ class PatientPortal extends StatefulWidget {
       required this.error,
       required this.onRefresh,
       required this.onLocalChange,
+      required this.onAccountUpdated,
       required this.onSignOut});
   final SyncApi api;
   final Map<String, dynamic> account;
@@ -1163,6 +1167,7 @@ class PatientPortal extends StatefulWidget {
   final String? error;
   final Future<void> Function() onRefresh;
   final Future<void> Function() onLocalChange;
+  final Future<void> Function(Map<String, dynamic>) onAccountUpdated;
   final Future<void> Function() onSignOut;
   @override
   State<PatientPortal> createState() => _PatientPortalState();
@@ -1370,16 +1375,20 @@ class _PatientPortalState extends State<PatientPortal>
               borderRadius: BorderRadius.circular(6)),
           child: Padding(
               padding: const EdgeInsets.all(12), child: Text(message))));
-  Widget _panel(String title, Widget child) => Card(
+  Widget _panel(String title, Widget child, {Widget? action}) => Card(
       child: Padding(
           padding: const EdgeInsets.all(16),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: darkGreen)),
+            Row(children: [
+              Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: darkGreen))),
+              if (action != null) action,
+            ]),
             const SizedBox(height: 12),
             child
           ])));
@@ -2060,6 +2069,16 @@ class _PatientPortalState extends State<PatientPortal>
     ]);
   }
 
+  Future<void> _editProfile() async {
+    final updated = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (_) => _PatientProfileEditor(
+            initialProfile: profile, onSave: widget.api.updateProfile));
+    if (updated == null || !mounted) return;
+    await widget.onAccountUpdated(updated);
+    if (mounted) setState(() => actionError = null);
+  }
+
   Widget _profile() =>
       Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _panel(
@@ -2075,7 +2094,12 @@ class _PatientPortalState extends State<PatientPortal>
               _detail('Diagnosis year', '${profile['diagnosisYear'] ?? ''}'),
               _detail('Medications', '${profile['medications'] ?? ''}'),
               _detail('Allergies', '${profile['allergies'] ?? ''}'),
-            ])),
+            ]),
+            action: TextButton.icon(
+                key: const ValueKey('edit-profile'),
+                onPressed: _editProfile,
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit'))),
         if ('${profile['emergencyContact'] ?? ''}'.trim().isNotEmpty)
           _panel(
               'Legacy emergency-contact information',
@@ -2129,10 +2153,6 @@ class _PatientPortalState extends State<PatientPortal>
                   icon: const Icon(Icons.add),
                   label: Text(contactsSaving ? 'Saving…' : 'Add contact')),
             ])),
-        _panel(
-            'Basal plan',
-            _empty(
-                'An AI-suggested basal schedule requires confirmation by your doctor. No confirmed schedule is available here yet.')),
         OutlinedButton.icon(
             onPressed: widget.onSignOut,
             icon: const Icon(Icons.logout),
@@ -2147,6 +2167,233 @@ class _PatientPortalState extends State<PatientPortal>
                 textAlign: TextAlign.end,
                 style: const TextStyle(fontWeight: FontWeight.w600)))
       ]));
+}
+
+class _PatientProfileEditor extends StatefulWidget {
+  const _PatientProfileEditor(
+      {required this.initialProfile, required this.onSave});
+  final Map<String, dynamic> initialProfile;
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic>) onSave;
+
+  @override
+  State<_PatientProfileEditor> createState() => _PatientProfileEditorState();
+}
+
+class _PatientProfileEditorState extends State<_PatientProfileEditor> {
+  final formKey = GlobalKey<FormState>();
+  late final TextEditingController fullName;
+  late final TextEditingController age;
+  late final TextEditingController weight;
+  late final TextEditingController height;
+  late final TextEditingController diagnosisYear;
+  late final TextEditingController insulinPlan;
+  late final TextEditingController medications;
+  late final TextEditingController allergies;
+  late String diabetesType;
+  bool saving = false;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    String value(String key) => '${widget.initialProfile[key] ?? ''}';
+    fullName = TextEditingController(text: value('fullName'));
+    age = TextEditingController(text: value('age'));
+    weight = TextEditingController(text: value('weight'));
+    height = TextEditingController(text: value('height'));
+    diagnosisYear = TextEditingController(text: value('diagnosisYear'));
+    insulinPlan = TextEditingController(text: value('insulinPlan'));
+    medications = TextEditingController(text: value('medications'));
+    allergies = TextEditingController(text: value('allergies'));
+    diabetesType = value('diabetesType');
+    if (!const {'', 'Type 1 Diabetes', 'Type 2 Diabetes'}
+        .contains(diabetesType)) {
+      diabetesType = '';
+    }
+  }
+
+  @override
+  void dispose() {
+    fullName.dispose();
+    age.dispose();
+    weight.dispose();
+    height.dispose();
+    diagnosisYear.dispose();
+    insulinPlan.dispose();
+    medications.dispose();
+    allergies.dispose();
+    super.dispose();
+  }
+
+  String? _requiredText(String? value) =>
+      value == null || value.trim().isEmpty ? 'This field is required.' : null;
+
+  String? _numberInRange(String? value, String label, double min,
+      [double? max]) {
+    final number = double.tryParse(value?.trim() ?? '');
+    if (number == null ||
+        !number.isFinite ||
+        number < min ||
+        max != null && number > max) {
+      return max == null
+          ? '$label must be at least ${min.toStringAsFixed(0)}.'
+          : '$label must be between ${min.toStringAsFixed(0)} and ${max.toStringAsFixed(0)}.';
+    }
+    return null;
+  }
+
+  String? _optionalNumber(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    return double.tryParse(text)?.isFinite == true
+        ? null
+        : 'Enter a valid number.';
+  }
+
+  Future<void> _save() async {
+    if (saving || !(formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      saving = true;
+      error = null;
+    });
+    final payload = <String, dynamic>{
+      ...widget.initialProfile,
+      'fullName': fullName.text.trim(),
+      'age': age.text.trim(),
+      'weight': weight.text.trim(),
+      'height': height.text.trim(),
+      'diabetesType': diabetesType,
+      'insulinPlan': insulinPlan.text.trim(),
+      'diagnosisYear': diagnosisYear.text.trim(),
+      'medications': medications.text.trim(),
+      'allergies': allergies.text.trim(),
+    };
+    try {
+      final account = await widget.onSave(payload);
+      if (mounted) Navigator.of(context).pop(account);
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          saving = false;
+          error = failure.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: const Text('Edit my information'),
+        content: SizedBox(
+          width: 520,
+          child: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextFormField(
+                    key: const ValueKey('profile-full-name'),
+                    controller: fullName,
+                    validator: _requiredText,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Full name')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-age'),
+                    controller: age,
+                    validator: (value) => _numberInRange(value, 'Age', 1, 120),
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Age')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-weight'),
+                    controller: weight,
+                    validator: (value) => _numberInRange(value, 'Weight', 1),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Weight (kg)')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-height'),
+                    controller: height,
+                    validator: (value) => _numberInRange(value, 'Height', 1),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Height (cm)')),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                    key: const ValueKey('profile-diabetes-type'),
+                    initialValue: diabetesType,
+                    onChanged: saving
+                        ? null
+                        : (value) => setState(() => diabetesType = value ?? ''),
+                    decoration:
+                        const InputDecoration(labelText: 'Diabetes type'),
+                    items: const [
+                      DropdownMenuItem(value: '', child: Text('Not provided')),
+                      DropdownMenuItem(
+                          value: 'Type 1 Diabetes',
+                          child: Text('Type 1 Diabetes')),
+                      DropdownMenuItem(
+                          value: 'Type 2 Diabetes',
+                          child: Text('Type 2 Diabetes')),
+                    ]),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-diagnosis-year'),
+                    controller: diagnosisYear,
+                    validator: _optionalNumber,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Diagnosis year')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-insulin-plan'),
+                    controller: insulinPlan,
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Insulin plan')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-medications'),
+                    controller: medications,
+                    textInputAction: TextInputAction.next,
+                    decoration:
+                        const InputDecoration(labelText: 'Medications')),
+                const SizedBox(height: 12),
+                TextFormField(
+                    key: const ValueKey('profile-allergies'),
+                    controller: allergies,
+                    decoration: const InputDecoration(labelText: 'Allergies')),
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(error!,
+                          key: const ValueKey('profile-save-error'),
+                          style: const TextStyle(color: Colors.red))),
+                ],
+              ]),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              key: const ValueKey('cancel-profile-edit'),
+              onPressed: saving ? null : () => Navigator.of(context).pop(),
+              child: const Text('Cancel')),
+          FilledButton(
+              key: const ValueKey('save-profile-changes'),
+              onPressed: saving ? null : _save,
+              child: Text(saving ? 'Saving…' : 'Save changes')),
+        ],
+      );
 }
 
 class _ClinicalEntryDialog extends StatefulWidget {
