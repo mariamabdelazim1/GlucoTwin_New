@@ -136,6 +136,17 @@ textarea {
   border-color: #8ec4e3;
 }
 
+.patient-messages-page .message-bubble-outgoing {
+  border-color: #b9d7e9;
+  background-color: #e1f0fa;
+}
+
+.patient-messages-page .message-attachment:hover {
+  border-color: #b9d7e9;
+  background-color: #e1f0fa;
+  color: #176391;
+}
+
 .patient-dashboard-content {
   container: patient-page / inline-size;
 }

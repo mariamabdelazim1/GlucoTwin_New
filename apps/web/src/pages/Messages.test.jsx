@@ -20,6 +20,10 @@ test('conversation renders oldest to newest with deterministic timestamp ties', 
   const text = screen.getByTestId('message-scroll').textContent;
   expect(text.indexOf('Tie A')).toBeLessThan(text.indexOf('Tie B'));
   expect(text.indexOf('Tie B')).toBeLessThan(text.indexOf('Newest'));
+  expect(document.querySelector('.patient-messages-page')).toBeTruthy();
+  expect(screen.getByText('Tie A').closest('.message-bubble').classList.contains('message-bubble-outgoing')).toBe(true);
+  expect(screen.getByText('Tie B').closest('.message-bubble').classList.contains('message-bubble-incoming')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Attach file' })).toBeTruthy();
 });
 
 test('thread follows initial, switched, outgoing, and near-bottom messages but preserves an older reading position', () => {
