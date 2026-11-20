@@ -4,7 +4,7 @@ import { createEmergencyContact, deleteEmergencyContact, getEmergencyContacts, u
 import type { EmergencyContact } from '../../utils/sync';
 
 const empty = { contactName: '', relationship: '', phoneNumber: '', isPrimary: false };
-const field = 'mt-1 w-full rounded-md border border-clinical-border px-3 py-2 text-sm';
+const field = 'focus-ring mt-1 w-full rounded-md border border-clinical-border bg-white px-3 py-2 text-sm';
 
 export function EmergencyContacts({ legacyValue }: { legacyValue?: string }) {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
@@ -63,7 +63,7 @@ export function EmergencyContacts({ legacyValue }: { legacyValue?: string }) {
       <label className="text-sm font-semibold">Relationship<input value={form.relationship} onChange={(event) => setForm({ ...form, relationship: event.target.value })} className={field} /></label>
       <label className="text-sm font-semibold sm:col-span-2">Phone with country code<input type="tel" value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} placeholder="+201001234567" className={field} /></label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isPrimary} onChange={(event) => setForm({ ...form, isPrimary: event.target.checked })} /> Primary contact</label>
-      <div className="flex gap-2 sm:justify-end"><button type="button" disabled={saving} onClick={() => void save()} className="inline-flex items-center gap-2 rounded-md bg-clinical-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><Plus size={16} />{saving ? 'Saving…' : editing ? 'Update' : 'Add contact'}</button>{editing ? <button type="button" disabled={saving} onClick={() => { setEditing(null); setForm(empty); }} className="rounded-md border px-3 py-2 text-sm">Cancel</button> : null}</div>
+      <div className="flex flex-wrap gap-2 sm:justify-end"><button type="button" disabled={saving} onClick={() => void save()} className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-primaryDark disabled:opacity-50"><Plus size={16} />{saving ? 'Saving…' : editing ? 'Update' : 'Add contact'}</button>{editing ? <button type="button" disabled={saving} onClick={() => { setEditing(null); setForm(empty); }} className="focus-ring rounded-md border border-clinical-border px-3 py-2 text-sm hover:bg-clinical-secondary">Cancel</button> : null}</div>
     </div>
     {error ? <p role="alert" className="mt-3 text-sm text-clinical-critical">{error}</p> : null}
   </section>;

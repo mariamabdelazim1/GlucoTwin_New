@@ -55,7 +55,7 @@ export function DoctorProfile({ account, accounts, ratings, onSave }: { account:
     window.setTimeout(() => setSaved(false), 2000);
   };
 
-  return <>
+  return <div className={!isDoctor ? 'patient-profile-page patient-dashboard-content' : undefined}>
     <PageHeader title={isDoctor ? 'Doctor Profile' : 'Patient Profile'} subtitle={isDoctor ? 'Keep your public professional profile current.' : 'Keep your health information and care team current.'} />
     <div className="grid gap-6 xl:grid-cols-[280px_1fr]">
       <aside className="surface h-fit p-5 text-center">
@@ -91,10 +91,10 @@ export function DoctorProfile({ account, accounts, ratings, onSave }: { account:
           <h3 className="font-semibold">Certificate and paper files</h3>
           <div className="mt-3 flex flex-wrap gap-2">{(['certificate', 'paper'] as const).map((kind) => <label key={kind} className="focus-ring inline-flex cursor-pointer items-center gap-2 rounded-md border border-clinical-border px-3 py-2 text-sm font-semibold text-clinical-primary"><FilePlus2 size={16} /> Add {kind}<input className="sr-only" type="file" accept=".pdf,image/*" multiple onChange={(event) => void upload(event, kind)} /></label>)}</div>
           <ul className="mt-4 space-y-2">{(doctor.documents ?? []).map((document) => <li key={document.id} className="flex items-center justify-between gap-3 rounded-md bg-clinical-bg px-3 py-2 text-sm"><a href={document.dataUrl} target="_blank" rel="noreferrer" className="min-w-0 truncate font-semibold text-clinical-primary">{document.name}</a><button type="button" onClick={() => setDoctor({ ...doctor, documents: doctor.documents?.filter((item) => item.id !== document.id) })} aria-label={`Remove ${document.name}`} className="focus-ring text-clinical-critical"><Trash2 size={17} /></button></li>)}</ul>
-        </div> : <div className="border-t border-clinical-border pt-5"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-semibold">Your doctor</h3><Link to="/patient/doctors" className="text-sm font-semibold text-clinical-primary">Find or change doctor</Link></div><DoctorDirectory doctors={accounts.filter((item) => item.role === 'doctor' && item.doctorProfile)} ratings={ratings} selectedId={account.patientProfile?.selectedDoctorId} /></div>}
+        </div> : <div className="border-t border-clinical-border pt-5"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-semibold">Your doctor</h3><Link to="/patient/doctors" className="text-sm font-semibold text-clinical-primary">Find or change doctor</Link></div><DoctorDirectory doctors={accounts.filter((item) => item.role === 'doctor' && item.doctorProfile)} ratings={ratings} selectedId={account.patientProfile?.selectedDoctorId} portalTheme /></div>}
         {error ? <p role="alert" className="text-sm text-clinical-critical">{error}</p> : null}
-        <button disabled={saving} className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white disabled:opacity-50">{saved ? <Check size={18} /> : <Save size={18} />}{saving ? 'Saving…' : saved ? 'Saved' : 'Save profile'}</button>
+        <button disabled={saving} className="focus-ring inline-flex items-center gap-2 rounded-md bg-clinical-primary px-4 py-2 font-semibold text-white hover:bg-clinical-primaryDark disabled:opacity-50">{saved ? <Check size={18} /> : <Save size={18} />}{saving ? 'Saving…' : saved ? 'Saved' : 'Save profile'}</button>
       </form>
     </div>
-  </>;
+  </div>;
 }
