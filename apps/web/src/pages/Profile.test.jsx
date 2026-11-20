@@ -22,6 +22,7 @@ vi.mock('../utils/sync', async (importOriginal) => ({
 }));
 
 const patientAccount = seedAccounts.find((account) => account.id === 'omar-hassan');
+const doctorAccount = seedAccounts.find((account) => account.id === 'DR-001');
 
 beforeEach(() => {
   emergencyApi.get.mockResolvedValue({ contacts: [] });
@@ -70,4 +71,21 @@ test('patient emergency contact form keeps validation and saves structured conta
     isPrimary: false,
   }));
   expect(emergencyApi.get).toHaveBeenCalledTimes(2);
+});
+
+test('doctor profile preserves professional fields and saves edits', async () => {
+  const onSave = vi.fn().mockResolvedValue(null);
+  render(<MemoryRouter><DoctorProfile account={doctorAccount} accounts={seedAccounts} ratings={[]} onSave={onSave} /></MemoryRouter>);
+
+  fireEvent.change(screen.getByLabelText('Years of experience'), { target: { value: '13' } });
+  fireEvent.change(screen.getByLabelText('About your practice'), { target: { value: 'Updated diabetes care profile.' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save profile' }));
+
+  await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+  expect(onSave.mock.calls[0][0].doctorProfile).toMatchObject({
+    fullName: 'Dr. Sarah Ahmed',
+    yearsExperience: '13',
+    bio: 'Updated diabetes care profile.',
+  });
+  expect(await screen.findByRole('button', { name: 'Saved' })).toBeTruthy();
 });

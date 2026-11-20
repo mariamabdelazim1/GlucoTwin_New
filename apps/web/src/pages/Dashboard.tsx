@@ -43,12 +43,12 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
         <div className="flex items-center justify-between border-b border-clinical-border p-4"><h2 className="text-lg font-semibold">Unstable Patients</h2><Link to="/patients" className="text-sm font-semibold text-clinical-primary">View all patients</Link></div>
         <PatientTable patients={unstable} compact />
       </section>
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_380px]">
-        <section className="surface p-4">
+      <div className="mt-6 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="surface min-w-0 p-4">
           <h2 className="text-lg font-semibold">Recent Messages</h2>
           <div className="mt-4 space-y-3">
             {chronologicalMessages(patientMessages).reverse().slice(0, 3).map((message) => (
-              <Link to={`/messages?patient=${message.patientSlug}`} key={message.id} className="focus-ring flex gap-3 rounded-lg border border-clinical-border p-3 hover:bg-emerald-50">
+              <Link to={`/messages?patient=${message.patientSlug}`} key={message.id} className="focus-ring flex gap-3 rounded-lg border border-clinical-border p-3 hover:bg-clinical-secondary">
                 <Avatar label={message.avatar} />
                 <span className="min-w-0 flex-1"><strong className="text-sm">{message.patient}</strong><span className="ml-2 text-xs text-clinical-muted">{message.time}</span><p className="truncate text-sm text-clinical-muted">{message.text}</p></span>
                 {message.unread ? <span className="h-2 w-2 rounded-full bg-clinical-primary" aria-label="Unread" /> : null}
@@ -56,7 +56,7 @@ export function Dashboard({ doctorId, doctorName, patientRecords, foodEntries, b
             ))}
           </div>
         </section>
-        <section className="surface p-4">
+        <section className="surface min-w-0 p-4">
           <h2 className="text-lg font-semibold">Glucose Alerts</h2>
           <div className="mt-4 space-y-3 text-sm">
             {glucoseAlerts.length ? glucoseAlerts.map((patient) => <div key={patient.slug} className="rounded-lg border border-red-200 bg-red-50 p-3"><strong>{patient.name}</strong> - {patient.currentGlucose} mg/dL ({patient.status})</div>) : <p className="text-clinical-muted">No glucose alerts.</p>}

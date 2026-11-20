@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message, Patient, PatientProfile, PatientRegistrationRequest, Role } from './types';
+import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, Message, Patient, PatientProfile, RegistrationRequest, Role } from './types';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { Login } from './pages/Login';
@@ -34,6 +34,11 @@ import { AssignmentDecisionError, confirmAssignmentDecision } from './utils/assi
 type Session = { id: string; role: Role };
 type AssignmentAction = { state: 'pending' | 'success' | 'error'; message: string };
 const assignmentKey = (patientId: string, doctorId: string) => `${doctorId}:${patientId}`;
+
+export function usesBluePortalTheme(role: Role, pathname: string) {
+  if (role === 'doctor') return true;
+  return role === 'patient' && ['/patient/dashboard', '/patient/food', '/patient/doctors', '/messages', '/notifications', '/profile'].includes(pathname);
+}
 
 function RoleOnly({ role, allowed, children }: { role: Role; allowed: Role[]; children: ReactNode }) {
   const fallback = role === 'patient' ? '/patient/dashboard' : role === 'admin' ? '/admin' : '/dashboard';
@@ -79,10 +84,10 @@ function Shell({ session, account, accounts, assignments, assignmentActions, onA
   const currentAssignment = assignments.find((item) => item.patientId === account?.id && item.doctorId === account?.patientProfile?.selectedDoctorId);
   const selectedDoctor = accounts.find((item) => item.id === account?.patientProfile?.selectedDoctorId);
   const doctorName = selectedDoctor?.doctorProfile?.fullName || 'your doctor';
-  const patientDashboardTheme = role === 'patient' && (location.pathname === '/patient/dashboard' || location.pathname === '/patient/food' || location.pathname === '/patient/doctors' || location.pathname === '/messages' || location.pathname === '/notifications' || location.pathname === '/profile');
+  const bluePortalTheme = usesBluePortalTheme(role, location.pathname);
 
-  return <div className={`min-h-screen bg-clinical-bg text-clinical-text lg:flex ${patientDashboardTheme ? 'patient-dashboard-shell' : ''}`}>
-    <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} dashboardTheme={patientDashboardTheme} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
+  return <div className={`min-h-screen bg-clinical-bg text-clinical-text lg:flex ${bluePortalTheme ? 'patient-dashboard-shell' : ''}`}>
+    <AppSidebar role={role} account={account} collapsed={collapsed} mobileOpen={mobileOpen} dashboardTheme={bluePortalTheme} onSignOut={onSignOut} onToggle={() => { setMobileOpen((open) => !open); setCollapsed((value) => !value); }} onMobileClose={() => setMobileOpen(false)} />
     <div className="min-w-0 flex-1">
       <TopHeader title={title} role={role} account={account} />
       <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6">{syncError && role !== 'admin' ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{syncError}</div> : null}{directoryError ? <div role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{directoryError}</div> : null}<Routes>
@@ -321,7 +326,7 @@ export default function App() {
     } catch (error) { return authenticationErrorMessage(error); }
     return null;
   };
-  const register = async (request: PatientRegistrationRequest) => {
+  const register = async (request: RegistrationRequest) => {
     if (request.account.email.toLowerCase() === 'admin' || accounts.some((item) => item.email.toLowerCase() === request.account.email.toLowerCase())) return 'An account with this email already exists.';
     try {
       const created = await bridgeAccount(request);

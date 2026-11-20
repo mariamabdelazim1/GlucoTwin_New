@@ -93,7 +93,7 @@ export function Notifications({ role, accountId, selectedDoctorId, doctorName, v
             <h2 className="border-b border-clinical-border p-4 text-lg font-semibold">{group}</h2>
             <div className="divide-y divide-clinical-border">
               {visible.filter((item) => item.group === group).map((item) => (
-                <article key={item.id} className={`notification-row flex min-w-0 flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between ${item.read ? 'bg-white' : role === 'patient' ? 'bg-clinical-secondary' : 'bg-emerald-50'}`}>
+                <article key={item.id} className={`notification-row flex min-w-0 flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between ${item.read ? 'bg-white' : 'bg-clinical-secondary'}`}>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2"><Badge tone={item.type === 'Critical glucose' ? 'border-red-200 bg-red-50 text-red-700' : undefined}>{item.type}</Badge><span className="text-xs text-clinical-muted">{item.time}</span></div>
                     <h3 className="mt-2 font-semibold">{item.title}</h3>

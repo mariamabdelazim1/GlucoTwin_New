@@ -1,4 +1,4 @@
-import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, LoginRequest, Message, PatientRegistrationRequest } from '../types';
+import type { Account, BolusEntry, CareAssignment, DoctorRating, FoodEntry, LoginRequest, Message, RegistrationRequest } from '../types';
 export { mergeById } from './syncState.ts';
 import { withoutLocalSyncMetadata } from './syncState.ts';
 import { sanitizePublicAccount } from './accountState.ts';
@@ -104,7 +104,7 @@ function persistAuthenticationToken(token: string) {
   catch { throw new SyncStorageError(); }
 }
 
-export async function bridgeAccount(request: PatientRegistrationRequest) {
+export async function bridgeAccount(request: RegistrationRequest) {
   const result = await api<unknown>('auth/bridge', 'POST', { account: { ...request.account, password: request.password } });
   const authentication = validatedAuthentication(result);
   persistAuthenticationToken(authentication.token);

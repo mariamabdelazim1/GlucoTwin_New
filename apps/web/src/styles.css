@@ -50,14 +50,14 @@ textarea {
   background: rgba(255, 255, 255, 0.96);
 }
 
-.patient-dashboard-shell .patient-dashboard-content .surface {
+.patient-dashboard-shell main .surface {
   border-color: #d6e5f0;
   border-radius: 0.875rem;
   box-shadow: 0 8px 24px rgba(11, 53, 85, 0.06);
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
-.patient-dashboard-shell .patient-dashboard-content .surface:hover {
+.patient-dashboard-shell main .surface:hover {
   border-color: #b9d7e9;
   box-shadow: 0 12px 30px rgba(11, 53, 85, 0.09);
 }
@@ -136,12 +136,12 @@ textarea {
   border-color: #8ec4e3;
 }
 
-.patient-messages-page .message-bubble-outgoing {
+.patient-dashboard-shell .message-bubble-outgoing {
   border-color: #b9d7e9;
   background-color: #e1f0fa;
 }
 
-.patient-messages-page .message-attachment:hover {
+.patient-dashboard-shell .message-attachment:hover {
   border-color: #b9d7e9;
   background-color: #e1f0fa;
   color: #176391;

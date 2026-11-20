@@ -72,4 +72,16 @@ export class ApiError extends Error {
   }
 }
 
+export function validateDoctorRegistration(account) {
+  const profile = account?.doctorProfile;
+  if (!profile || typeof profile !== 'object') throw new ApiError(400, 'Complete the doctor profile before creating the account');
+  for (const [field, label] of [['fullName', 'Full name'], ['specialty', 'Specialty'], ['medicalSchool', 'Medical college / university']]) {
+    if (typeof profile[field] !== 'string' || !profile[field].trim()) throw new ApiError(400, `${label} is required`);
+  }
+  const experience = Number(profile.yearsExperience);
+  if (typeof profile.yearsExperience === 'boolean' || !String(profile.yearsExperience ?? '').trim() || !Number.isFinite(experience) || experience < 0 || experience > 70) {
+    throw new ApiError(400, 'Years of experience must be between 0 and 70');
+  }
+}
+
 

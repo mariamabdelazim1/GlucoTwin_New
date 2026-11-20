@@ -181,7 +181,7 @@ status fields.
 
 Existing `/api` response shapes are retained for the React and Flutter clients. Snapshots additionally return normalized meal status, planned/actual times, announced/consumed carbohydrates, and version; normalized columns override stale values in `legacy_payload`.
 
-The existing admin screens still use frontend/demo state. This migration does not create an admin role, an admin provisioning API, or broad administrative access. New doctor accounts cannot be self-registered through `/api/auth/bridge`; they must be explicitly provisioned in a controlled process.
+The existing admin screens still use frontend/demo state. This migration does not create an admin role or broad administrative access. Patient and doctor registration use `/api/auth/bridge`; new doctor registrations must include the required professional profile fields and are validated before the account and profile are created transactionally.
 
 Client-provided IDs keep identical creates idempotent, while a conflicting create returns HTTP 409. Meal edits use optimistic versions and retry-safe mutation IDs; broader durable offline conflict resolution is not claimed.
 

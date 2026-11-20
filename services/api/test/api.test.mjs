@@ -116,10 +116,28 @@ test('PostgreSQL API persistence, authorization, traceability, and import behavi
       const invalidProfile = await bridgeProfile({ ...profileUpdate.body.account, patientProfile: { ...profileUpdate.body.account.patientProfile, [field]: invalid } });
       assert.equal(invalidProfile.status, 400, `accepted invalid profile ${field}`);
     }
-    const forbiddenDoctor = await request('auth/bridge', { method: 'POST', data: { account: {
-      id: `doctor-${runId}`, role: 'doctor', email: `doctor-${runId}@example.test`, password: 'test-password', doctorProfile: { fullName: 'Unprovisioned Doctor' },
+    const registeredDoctorId = `doctor-${runId}`;
+    const registeredDoctorEmail = `${registeredDoctorId}@example.test`;
+    const registeredDoctor = await request('auth/bridge', { method: 'POST', data: { account: {
+      id: registeredDoctorId, role: 'doctor', email: registeredDoctorEmail, password: 'test-password', doctorProfile: {
+        fullName: 'Registered Doctor', specialty: 'Endocrinology', yearsExperience: '7', medicalSchool: 'Cairo University', qualifications: '', bio: '', certificates: [], papers: [],
+      },
     } } });
-    assert.equal(forbiddenDoctor.status, 403);
+    assert.equal(registeredDoctor.status, 200, JSON.stringify(registeredDoctor.body));
+    assert.equal(registeredDoctor.body.account.role, 'doctor');
+    assert.equal(registeredDoctor.body.account.doctorProfile.fullName, 'Registered Doctor');
+    assert.equal((await request('auth/login', { method: 'POST', data: { email: registeredDoctorEmail, password: 'test-password', role: 'doctor' } })).status, 200);
+    const duplicateDoctor = await request('auth/bridge', { method: 'POST', data: { account: {
+      id: `${registeredDoctorId}-duplicate`, role: 'doctor', email: registeredDoctorEmail, password: 'test-password', doctorProfile: {
+        fullName: 'Duplicate Doctor', specialty: 'Endocrinology', yearsExperience: '7', medicalSchool: 'Cairo University', certificates: [], papers: [],
+      },
+    } } });
+    assert.equal(duplicateDoctor.status, 409);
+    assert.equal(duplicateDoctor.body.error, 'An account with this email already exists');
+    const invalidDoctor = await request('auth/bridge', { method: 'POST', data: { account: {
+      id: `${registeredDoctorId}-invalid`, role: 'doctor', email: `invalid-${registeredDoctorEmail}`, password: 'test-password', doctorProfile: { fullName: 'Incomplete Doctor' },
+    } } });
+    assert.equal(invalidDoctor.status, 400);
     const collidingId = await request('auth/bridge', { method: 'POST', data: { account: {
       id: firstId, role: 'patient', email: `different-${runId}@example.test`, password: 'test-password', patientProfile: { fullName: 'Collision' },
     } } });

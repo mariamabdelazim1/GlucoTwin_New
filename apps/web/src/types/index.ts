@@ -62,8 +62,8 @@ export interface LoginRequest {
   role: Account['role'];
 }
 
-export interface PatientRegistrationRequest {
-  account: Account & { role: 'patient' };
+export interface RegistrationRequest {
+  account: Account;
   password: string;
 }
 
